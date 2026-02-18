@@ -1,0 +1,15 @@
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local-only stuff
+test files/
+*.log
+HANDOFF.md
+SecOps Workbench – Project Plan.md
+
+# Build/output (if you add any later)
+dist/
+node_modules/
