@@ -7,7 +7,7 @@
   const meta = {
     title: "CSV / Spreadsheet Workbench",
     subtitle:
-      "Load, inspect, annotate, and export SecOps CSV data. All processing happens locally.",
+      "Load, inspect, annotate, and export PB Tools CSV data. All processing happens locally.",
   };
 
   // In-memory state
