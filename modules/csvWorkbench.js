@@ -1275,7 +1275,39 @@
     ]);
   }
 
-  // ── Table preview ─────────────────────────────────────────────────────────
+  function showColumnContextMenu(e, field) {
+    e.preventDefault();
+    e.stopPropagation(); // don't trigger sort click
+
+    const displayName = viewState.displayNames[field] || field;
+    // Use all filtered+sorted rows (not just preview) for column copies
+    const allRows = getFilteredSortedRows();
+
+    function buildColHtmlTable() {
+      const th  = `<th style="border:1px solid #ccc;padding:4px 8px;background:#f3f4f6;">${displayName}</th>`;
+      const tds = allRows.map(r => `<tr><td style="border:1px solid #ccc;padding:4px 8px;">${r[field] ?? ""}</td></tr>`).join("");
+      return `<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px;"><thead><tr>${th}</tr></thead><tbody>${tds}</tbody></table>`;
+    }
+
+    ctxMenu.show(e.clientX, e.clientY, [
+      {
+        label: `Copy column with header`,
+        action: () => {
+          const html = buildColHtmlTable();
+          const blob = new Blob([html], { type: "text/html" });
+          navigator.clipboard?.write([new ClipboardItem({ "text/html": blob })]);
+        },
+      },
+      {
+        // Plain newline-separated values — pastes cleanly as a list in email/doc
+        label: `Copy values`,
+        action: () => {
+          const text = allRows.map(r => r[field] ?? "").join("\n");
+          navigator.clipboard?.writeText(text);
+        },
+      },
+    ]);
+  }
 
   function renderTablePreview() {
     const container = document.getElementById("csvTableContainer");
@@ -1354,6 +1386,8 @@
         }
         renderTablePreview();
       });
+
+      th.addEventListener("contextmenu", e => showColumnContextMenu(e, field));
 
       hRow.appendChild(th);
     });
