@@ -310,6 +310,8 @@
     lastSummary = null;
     sortState   = { field: null, dir: "asc" };
     filterState = { text: "", field: "" };
+    selectedRows.clear();
+    lastSelectedRow = null;
 
     viewState.visibleFields  = [...fields];
     viewState.displayNames   = {};
@@ -1019,6 +1021,260 @@
     container.appendChild(cleanSection);
   }
 
+  // ── Row selection state ───────────────────────────────────────────────────
+  let selectedRows    = new Set(); // rowIdx values in current preview
+  let lastSelectedRow = null;
+
+  function refreshRowSelection() {
+    document.querySelectorAll("#csvTableContainer tbody tr").forEach((tr, i) => {
+      const isSelected = selectedRows.has(i);
+      tr.classList.toggle("row-selected", isSelected);
+      const gutter = tr.querySelector(".row-gutter");
+      if (gutter) gutter.classList.toggle("row-selected", isSelected);
+    });
+  }
+
+  const ctxMenu = {
+    el: null,
+
+    init() {
+      if (this.el) return;
+      const el = document.createElement("div");
+      el.id        = "pbContextMenu";
+      el.className = "ctx-menu hidden";
+      document.body.appendChild(el);
+      this.el = el;
+
+      // Dismiss on outside click or Escape
+      document.addEventListener("mousedown", e => {
+        if (!this.el.contains(e.target)) this.hide();
+      });
+      document.addEventListener("keydown", e => {
+        if (e.key === "Escape") this.hide();
+      });
+    },
+
+    show(x, y, items) {
+      this.init();
+      this.el.innerHTML = "";
+
+      items.forEach(item => {
+        if (item === "---") {
+          const sep = document.createElement("div");
+          sep.className = "ctx-separator";
+          this.el.appendChild(sep);
+          return;
+        }
+
+        const btn = document.createElement("button");
+        btn.className   = "ctx-item";
+        btn.textContent = item.label;
+        if (item.danger)    btn.classList.add("ctx-item--danger");
+        if (item.disabled)  btn.classList.add("ctx-item--disabled");
+        if (!item.disabled) {
+          btn.addEventListener("click", () => {
+            this.hide();
+            item.action();
+          });
+        }
+        this.el.appendChild(btn);
+      });
+
+      this.el.classList.remove("hidden");
+
+      // Position — keep within viewport
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      this.el.style.left = "0";
+      this.el.style.top  = "0";
+      const w = this.el.offsetWidth;
+      const h = this.el.offsetHeight;
+      this.el.style.left = `${Math.min(x, vw - w - 8)}px`;
+      this.el.style.top  = `${Math.min(y, vh - h - 8)}px`;
+    },
+
+    hide() {
+      if (this.el) this.el.classList.add("hidden");
+    },
+  };
+
+  function showCellContextMenu(e, field, cellValue, row, tr, dataIdx) {
+    e.preventDefault();
+    const hasNote    = !!(row[NOTE_COL] && String(row[NOTE_COL]).trim());
+    const displayName = viewState.displayNames[field] || field;
+
+    ctxMenu.show(e.clientX, e.clientY, [
+      {
+        label: `Copy cell value`,
+        action: () => navigator.clipboard?.writeText(cellValue),
+      },
+      {
+        label: `Filter by this value`,
+        action: () => {
+          filterState.text  = cellValue;
+          filterState.field = field;
+          const si = document.getElementById("csvSearchInput");
+          const sf = document.getElementById("csvSearchField");
+          const sc = document.getElementById("csvSearchClear");
+          if (si) si.value = cellValue;
+          if (sf) sf.value = field;
+          if (sc) sc.style.display = "flex";
+          renderTablePreview();
+        },
+      },
+      {
+        label: `Send to value mapping`,
+        action: () => {
+          // If mapping drawer is already open, just append — don't re-render
+          const alreadyOpen = drawerState.open && drawerState.panel === "mapping";
+          if (!alreadyOpen) openDrawer("mapping");
+
+          setTimeout(() => {
+            const colSelect = document.getElementById("vmColSelect");
+            const rulesList = document.getElementById("vmRulesList");
+            if (!colSelect || !rulesList) return;
+
+            // Set column selector (only if not already set to something)
+            if (!colSelect.value) colSelect.value = field;
+            else colSelect.value = field; // always match the cell's column
+
+            // Append a pre-filled mapping row — reuse last empty row if one exists
+            const existingRows = rulesList.querySelectorAll(".mapping-row");
+            const lastRow = existingRows[existingRows.length - 1];
+            const lastFrom = lastRow?.querySelector("input[placeholder='From']");
+            let rowEl, toInput;
+
+            if (lastFrom && lastFrom.value.trim() === "") {
+              // Reuse the existing empty row
+              rowEl   = lastRow;
+              lastFrom.value = cellValue;
+              toInput = lastRow.querySelector("input[placeholder='To']");
+            } else {
+              // Append a new row
+              rowEl = document.createElement("div");
+              rowEl.className = "mapping-row";
+
+              const fromInput = document.createElement("input");
+              fromInput.type        = "text";
+              fromInput.className   = "panel-input";
+              fromInput.placeholder = "From";
+              fromInput.value       = cellValue;
+
+              const arrow = document.createElement("span");
+              arrow.className   = "mapping-arrow";
+              arrow.textContent = "→";
+
+              toInput = document.createElement("input");
+              toInput.type        = "text";
+              toInput.className   = "panel-input";
+              toInput.placeholder = "To";
+
+              const delBtn = document.createElement("button");
+              delBtn.className   = "mapping-delete";
+              delBtn.textContent = "✕";
+              delBtn.title       = "Remove row";
+              delBtn.addEventListener("click", () => rowEl.remove());
+
+              rowEl.appendChild(fromInput);
+              rowEl.appendChild(arrow);
+              rowEl.appendChild(toInput);
+              rowEl.appendChild(delBtn);
+              rulesList.appendChild(rowEl);
+            }
+            toInput.focus();
+          }, alreadyOpen ? 0 : 50);
+        },
+      },
+      "---",
+      {
+        label: hasNote ? "Clear note for this row" : "Add note",
+        danger: hasNote,
+        action: () => {
+          if (hasNote) {
+            // Clear the note
+            if (dataIdx >= 0) parsedData.rows[dataIdx][NOTE_COL] = "";
+            const key = makeAnnotationKey(row);
+            if (key) {
+              const ann = loadAnnotations();
+              if (ann[key]) { ann[key].statusNote = ""; annotationsCache = ann; saveAnnotations(); }
+            }
+            tr.classList.remove("annotated");
+            // Update the note cell in the row visually
+            const noteTd = [...tr.querySelectorAll("td")].find(td => td.classList.contains("cell-note"));
+            if (noteTd) noteTd.textContent = "";
+          } else {
+            // Focus the note cell for this row to let user type
+            const noteTd = [...tr.querySelectorAll("td")].find(td => td.classList.contains("cell-note"));
+            if (noteTd) noteTd.click();
+          }
+        },
+      },
+    ]);
+  }
+
+  function showRowContextMenu(e, row, tr, dataIdx, rowIdx) {
+    e.preventDefault();
+    const hasNote  = !!(row[NOTE_COL] && String(row[NOTE_COL]).trim());
+    const fields   = getEffectiveFields();
+    const selCount = selectedRows.size;
+
+    // Build HTML table string for clipboard
+    function buildHtmlTable(rows) {
+      const headers = fields.map(f => viewState.displayNames[f] || f);
+      const ths = headers.map(h => `<th style="border:1px solid #ccc;padding:4px 8px;background:#f3f4f6;">${h}</th>`).join("");
+      const trs = rows.map(r =>
+        "<tr>" + fields.map(f => `<td style="border:1px solid #ccc;padding:4px 8px;">${r[f] ?? ""}</td>`).join("") + "</tr>"
+      ).join("");
+      return `<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+    }
+
+    function copyHtmlTable(rows) {
+      const html = buildHtmlTable(rows);
+      const blob = new Blob([html], { type: "text/html" });
+      const item = new ClipboardItem({ "text/html": blob });
+      navigator.clipboard?.write([item]);
+    }
+
+    ctxMenu.show(e.clientX, e.clientY, [
+      {
+        label: "Copy row as CSV",
+        action: () => {
+          const vals = fields.map(f => {
+            const v = String(row[f] ?? "");
+            return v.includes(",") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v;
+          });
+          navigator.clipboard?.writeText(vals.join(","));
+        },
+      },
+      {
+        label: selCount > 1 ? `Copy ${selCount} selected rows as table` : "Copy row as table",
+        action: () => {
+          const rowsToCopy = selCount > 1
+            ? [...selectedRows].sort((a,b) => a-b).map(i => getFilteredSortedRows()[i]).filter(Boolean)
+            : [row];
+          copyHtmlTable(rowsToCopy);
+        },
+      },
+      "---",
+      {
+        label: "Clear note for this row",
+        danger: true,
+        disabled: !hasNote,
+        action: () => {
+          if (dataIdx >= 0) parsedData.rows[dataIdx][NOTE_COL] = "";
+          const key = makeAnnotationKey(row);
+          if (key) {
+            const ann = loadAnnotations();
+            if (ann[key]) { ann[key].statusNote = ""; annotationsCache = ann; saveAnnotations(); }
+          }
+          tr.classList.remove("annotated");
+          const noteTd = [...tr.querySelectorAll("td")].find(td => td.classList.contains("cell-note"));
+          if (noteTd) noteTd.textContent = "";
+        },
+      },
+    ]);
+  }
+
   // ── Table preview ─────────────────────────────────────────────────────────
 
   function renderTablePreview() {
@@ -1068,6 +1324,12 @@
     // Header
     const thead = document.createElement("thead");
     const hRow  = document.createElement("tr");
+
+    // Gutter header
+    const gutterTh = document.createElement("th");
+    gutterTh.className = "row-gutter-th";
+    hRow.appendChild(gutterTh);
+
     fields.forEach(field => {
       const th = document.createElement("th");
       const dn = viewState.displayNames[field] || field;
@@ -1107,6 +1369,34 @@
       // Find the actual index in parsedData.rows for annotation writes
       const dataIdx = parsedData.rows.indexOf(row);
 
+      // Row gutter cell (row number + selection + row-level right-click)
+      const gutterTd = document.createElement("td");
+      gutterTd.className   = "row-gutter";
+      gutterTd.textContent = rowIdx + 1;
+      if (selectedRows.has(rowIdx)) {
+        gutterTd.classList.add("row-selected");
+        tr.classList.add("row-selected");
+      }
+      gutterTd.addEventListener("click", e => {
+        if (e.shiftKey && lastSelectedRow !== null) {
+          // Range select
+          const lo = Math.min(lastSelectedRow, rowIdx);
+          const hi = Math.max(lastSelectedRow, rowIdx);
+          for (let i = lo; i <= hi; i++) selectedRows.add(i);
+        } else {
+          if (selectedRows.has(rowIdx) && selectedRows.size === 1) {
+            selectedRows.clear();
+          } else {
+            selectedRows.clear();
+            selectedRows.add(rowIdx);
+          }
+        }
+        lastSelectedRow = rowIdx;
+        refreshRowSelection();
+      });
+      gutterTd.addEventListener("contextmenu", e => showRowContextMenu(e, row, tr, dataIdx, rowIdx));
+      tr.appendChild(gutterTd);
+
       fields.forEach(field => {
         const td  = document.createElement("td");
         const val = row[field];
@@ -1118,9 +1408,12 @@
         if (isProtected) {
           td.classList.add("cell-protected");
           td.title = "This column is read-only";
+          td.addEventListener("contextmenu", e => showCellContextMenu(e, field, displayVal, row, tr, dataIdx));
           tr.appendChild(td);
           return;
         }
+
+        td.addEventListener("contextmenu", e => showCellContextMenu(e, field, displayVal, row, tr, dataIdx));
 
         td.addEventListener("click", () => {
           if (td.querySelector("input")) return; // already editing
