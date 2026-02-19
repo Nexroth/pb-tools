@@ -39,9 +39,10 @@
 
         <section>
           <h3 style="font-size:0.85rem;margin:0 0 0.45rem;color:#9ca3af;font-weight:600;letter-spacing:0.04em;">ABOUT</h3>
-          <p style="font-size:0.8rem;color:#6b7280;line-height:1.5;margin:0;">
-            PB Tools v0.2.0 — internal helper app for CSV / spreadsheet workflows.<br>
-            All data processing happens locally in your browser. Nothing leaves your machine.
+          <p style="font-size:0.8rem;color:#6b7280;line-height:1.6;margin:0;">
+            <span style="color:#e5e7eb;font-weight:600;">PB Tools</span> v0.2.0<br>
+            All data processing happens locally in your browser. Nothing leaves your machine.<br>
+            <span style="color:#4b5563;">Developer:</span> <span style="color:#e5e7eb;">Raf</span>
           </p>
         </section>
       </div>

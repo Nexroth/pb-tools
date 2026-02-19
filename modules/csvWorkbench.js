@@ -30,7 +30,12 @@
   // ── In-memory state ───────────────────────────────────────────────────────
   let parsedData    = null;   // { fields: [...], rows: [...] }
   let currentFile   = null;   // File object for display name
-  let viewState     = { visibleFields: [], displayNames: {}, activePreset: null };
+  let viewState     = {
+    visibleFields:   [],
+    displayNames:    {},  // field → display name (only deltas from original stored in presets)
+    activePreset:    null,
+    appliedMappings: [],  // [{ column, from, to }, ...] — log of every mapping applied, for preset capture
+  };
   let lastSummary   = null;   // { field, rows: [{ value, count }] }
   let sortState     = { field: null, dir: "asc" };
   let filterState   = { text: "", field: "" };  // "" field = search all columns
@@ -123,7 +128,7 @@
 
   // ── Business logic ────────────────────────────────────────────────────────
 
-  function applyValueMappings(valueMapping) {
+  function applyValueMappings(valueMapping, skipLog = false) {
     if (!parsedData || !valueMapping || typeof valueMapping !== "object") return;
 
     const displayToField = {};
@@ -133,7 +138,7 @@
 
     Object.entries(valueMapping).forEach(([column, rulesObj]) => {
       if (!rulesObj || typeof rulesObj !== "object") return;
-      const fields  = parsedData.fields;
+      const fields   = parsedData.fields;
       const fieldKey = fields.includes(column) ? column : displayToField[column];
       if (!fieldKey) return;
 
@@ -148,6 +153,11 @@
             row[fieldKey] = to;
           }
         });
+
+        // Log for preset capture (unless called from preset replay)
+        if (!skipLog) {
+          viewState.appliedMappings.push({ column: fieldKey, from, to });
+        }
       });
     });
   }
@@ -312,6 +322,12 @@
     filterState = { text: "", field: "" };
     selectedRows.clear();
     lastSelectedRow = null;
+    viewState = {
+      visibleFields:   [...fields],
+      displayNames:    Object.fromEntries(fields.map(f => [f, f])),
+      activePreset:    null,
+      appliedMappings: [],
+    };
 
     viewState.visibleFields  = [...fields];
     viewState.displayNames   = {};
@@ -671,10 +687,11 @@
     el.appendChild(metaSpan);
 
     if (viewState.activePreset) {
-      const preset = presets[viewState.activePreset];
-      const badge  = document.createElement("span");
+      const allPresets = { ...presets, ...loadUserPresets() };
+      const p    = allPresets[viewState.activePreset];
+      const badge = document.createElement("span");
       badge.className   = "csv-preset-badge";
-      badge.textContent = `⚡ ${preset?.label || viewState.activePreset}`;
+      badge.textContent = `⚡ ${p?.label || viewState.activePreset}`;
       el.appendChild(badge);
     }
   }
@@ -682,6 +699,50 @@
   function updateDownloadBtn() {
     const btn = document.getElementById("csvDownloadBtn");
     if (btn) btn.disabled = !parsedData || !parsedData.rows.length;
+  }
+
+  // ── User preset storage ───────────────────────────────────────────────────
+  const USER_PRESETS_KEY = "pbToolsUserPresets";
+
+  function loadUserPresets() {
+    try {
+      const raw = localStorage.getItem(USER_PRESETS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  function saveUserPresets(map) {
+    try { localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(map)); } catch {}
+  }
+
+  function captureCurrentAsPreset(name) {
+    if (!parsedData) return null;
+
+    // Save display names for all visible fields (not just deltas)
+    // so renames back to original names are also preserved
+    const renames = {};
+    viewState.visibleFields.forEach(field => {
+      renames[field] = viewState.displayNames[field] || field;
+    });
+
+    // Collapse appliedMappings into { column: { from: to } } structure
+    const valueMappings = {};
+    viewState.appliedMappings.forEach(({ column, from, to }) => {
+      if (!valueMappings[column]) valueMappings[column] = {};
+      valueMappings[column][from] = to;
+    });
+
+    const id = `user_${Date.now()}`;
+    return {
+      id,
+      label:        name,
+      description:  `User preset — saved ${new Date().toLocaleDateString()}`,
+      keepFields:   [...viewState.visibleFields],
+      renameFields: renames,
+      valueMapping: valueMappings,
+      isUserPreset: true,
+      savedAt:      Date.now(),
+    };
   }
 
   // ── Panel builders ────────────────────────────────────────────────────────
@@ -757,71 +818,310 @@
 
   // Presets panel
   function buildPresetsPanel(container) {
-    // Select
-    const selectSection = panelSection("SELECT PRESET");
+    const userPresets = loadUserPresets();
+    const allUserPresets = Object.values(userPresets).sort((a,b) => b.savedAt - a.savedAt);
 
-    const select = document.createElement("select");
-    select.className = "panel-select";
-    select.disabled  = !parsedData;
-
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = parsedData ? "Select a preset…" : "Load a file first";
-    select.appendChild(placeholder);
-
+    // ── BUILT-IN PRESETS ────────────────────────────────────────────────────
+    const builtinSection = panelSection("BUILT-IN PRESETS");
     Object.values(presets).forEach(p => {
-      const opt       = document.createElement("option");
-      opt.value       = p.id;
-      opt.textContent = p.label;
-      select.appendChild(opt);
+      const row = document.createElement("div");
+      row.className = "preset-list-row";
+
+      const info = document.createElement("div");
+      info.className = "preset-list-info";
+
+      const nameEl = document.createElement("div");
+      nameEl.className   = "preset-list-name";
+      nameEl.textContent = p.label;
+      if (viewState.activePreset === p.id) nameEl.classList.add("active");
+
+      const descEl = document.createElement("div");
+      descEl.className   = "preset-list-desc";
+      descEl.textContent = p.description;
+
+      info.appendChild(nameEl);
+      info.appendChild(descEl);
+      row.appendChild(info);
+
+      if (parsedData) {
+        const applyBtn = document.createElement("button");
+        applyBtn.className   = "btn btn-ghost preset-apply-btn";
+        applyBtn.textContent = viewState.activePreset === p.id ? "✓ Applied" : "Apply";
+        applyBtn.disabled    = viewState.activePreset === p.id;
+        applyBtn.addEventListener("click", () => {
+          if (p.id === "phisherLike") applyPhisherLikePreset();
+          updateFileInfo();
+          renderTablePreview();
+          renderSummaryPanel();
+          renderDrawerPanel("presets");
+        });
+        row.appendChild(applyBtn);
+      }
+
+      builtinSection.appendChild(row);
     });
+    container.appendChild(builtinSection);
 
-    if (viewState.activePreset) select.value = viewState.activePreset;
+    // ── USER PRESETS ─────────────────────────────────────────────────────────
+    const divider1 = document.createElement("div");
+    divider1.className = "panel-divider";
+    container.appendChild(divider1);
 
-    selectSection.appendChild(select);
-    container.appendChild(selectSection);
+    const userSection = panelSection("MY PRESETS");
 
-    // Description
-    const desc = document.createElement("div");
-    desc.className = "preset-desc";
-    desc.id        = "presetDesc";
+    if (allUserPresets.length === 0) {
+      const empty = document.createElement("div");
+      empty.className   = "panel-hint";
+      empty.textContent = 'No saved presets yet. Shape your data then use "Save as preset" below.';
+      userSection.appendChild(empty);
+    } else {
+      allUserPresets.forEach(p => {
+        const row = document.createElement("div");
+        row.className = "preset-list-row";
 
-    function updateDesc() {
-      const p = presets[select.value];
-      desc.textContent = p ? p.description : "";
-      desc.style.display = p ? "block" : "none";
-    }
-    updateDesc();
-    select.addEventListener("change", updateDesc);
-    container.appendChild(desc);
+        const info = document.createElement("div");
+        info.className = "preset-list-info";
 
-    // Apply
-    if (parsedData) {
-      const applyBtn = applyButton("Apply preset");
-      applyBtn.style.marginTop = "0.1rem";
-      applyBtn.addEventListener("click", () => {
-        const chosen = select.value;
-        if (!chosen) return;
-        if (chosen === "phisherLike") applyPhisherLikePreset();
-        updateFileInfo();
-        updateDownloadBtn();
-        renderTablePreview();
-        renderSummaryPanel();
-        // Refresh this panel to show active preset status
-        renderDrawerPanel("presets");
+        const nameEl = document.createElement("div");
+        nameEl.className   = "preset-list-name";
+        nameEl.textContent = p.label;
+        if (viewState.activePreset === p.id) nameEl.classList.add("active");
+
+        const descEl = document.createElement("div");
+        descEl.className   = "preset-list-desc";
+        descEl.textContent = p.description;
+
+        info.appendChild(nameEl);
+        info.appendChild(descEl);
+        row.appendChild(info);
+
+        const actions = document.createElement("div");
+        actions.className = "preset-list-actions";
+
+        if (parsedData) {
+          const applyBtn = document.createElement("button");
+          applyBtn.className   = "btn btn-ghost preset-apply-btn";
+          applyBtn.textContent = viewState.activePreset === p.id ? "✓" : "Apply";
+          applyBtn.disabled    = viewState.activePreset === p.id;
+          applyBtn.addEventListener("click", () => {
+            applyUserPreset(p);
+            renderDrawerPanel("presets");
+          });
+          actions.appendChild(applyBtn);
+        }
+
+        const exportBtn = document.createElement("button");
+        exportBtn.className   = "btn btn-ghost";
+        exportBtn.textContent = "⬆";
+        exportBtn.title       = "Export preset as JSON";
+        exportBtn.addEventListener("click", () => exportPresetAsJson(p));
+        actions.appendChild(exportBtn);
+
+        // Rename button
+        const renameBtn = document.createElement("button");
+        renameBtn.className   = "btn btn-ghost";
+        renameBtn.textContent = "✏";
+        renameBtn.title       = "Rename preset";
+        renameBtn.addEventListener("click", () => {
+          const nameEl = row.querySelector(".preset-list-name");
+          if (!nameEl) return;
+
+          const currentName = p.label;
+          const input = document.createElement("input");
+          input.type      = "text";
+          input.className = "panel-input";
+          input.value     = currentName;
+          input.style.fontSize = "0.78rem";
+
+          nameEl.replaceWith(input);
+          input.focus();
+          input.select();
+
+          function commitRename() {
+            const newName = input.value.trim() || currentName;
+            const map = loadUserPresets();
+            if (map[p.id]) {
+              map[p.id].label = newName;
+              saveUserPresets(map);
+            }
+            renderDrawerPanel("presets");
+          }
+
+          input.addEventListener("blur", commitRename);
+          input.addEventListener("keydown", e => {
+            if (e.key === "Enter")  { e.preventDefault(); commitRename(); }
+            if (e.key === "Escape") { e.preventDefault(); renderDrawerPanel("presets"); }
+          });
+        });
+        actions.appendChild(renameBtn);
+
+        // Delete with inline confirmation
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className   = "btn btn-ghost preset-delete-btn";
+        deleteBtn.textContent = "✕";
+        deleteBtn.title       = "Delete preset";
+        let deleteTimeout = null;
+        let confirming = false;
+
+        deleteBtn.addEventListener("click", () => {
+          if (!confirming) {
+            // First click — ask for confirmation inline
+            confirming = true;
+            deleteBtn.textContent = "Delete?";
+            deleteBtn.classList.add("preset-delete-confirming");
+            deleteTimeout = setTimeout(() => {
+              // Auto-cancel after 3s
+              confirming = false;
+              deleteBtn.textContent = "✕";
+              deleteBtn.classList.remove("preset-delete-confirming");
+            }, 3000);
+          } else {
+            // Second click — confirmed
+            clearTimeout(deleteTimeout);
+            const map = loadUserPresets();
+            delete map[p.id];
+            saveUserPresets(map);
+            renderDrawerPanel("presets");
+          }
+        });
+        actions.appendChild(deleteBtn);
+
+        row.appendChild(actions);
+        userSection.appendChild(row);
       });
-      container.appendChild(applyBtn);
     }
 
-    // Active preset status
-    const divider = document.createElement("div");
-    divider.className = "panel-divider";
-    divider.style.marginTop = "0.5rem";
-    container.appendChild(divider);
+    container.appendChild(userSection);
+
+    // ── SAVE AS PRESET ────────────────────────────────────────────────────────
+    const divider2 = document.createElement("div");
+    divider2.className = "panel-divider";
+    container.appendChild(divider2);
+
+    const saveSection = panelSection("SAVE CURRENT STATE AS PRESET");
+
+    if (!parsedData) {
+      const hint = document.createElement("div");
+      hint.className   = "panel-hint";
+      hint.textContent = "Load a file and configure columns/mappings first.";
+      saveSection.appendChild(hint);
+    } else {
+      const nameInput = document.createElement("input");
+      nameInput.type        = "text";
+      nameInput.className   = "panel-input";
+      nameInput.placeholder = "Preset name…";
+
+      const saveStatus = document.createElement("div");
+      saveStatus.className = "panel-hint";
+      saveStatus.style.marginTop = "0.2rem";
+
+      saveSection.appendChild(nameInput);
+      saveSection.appendChild(saveStatus);
+
+      const saveBtn = applyButton("Save as preset");
+      saveBtn.style.marginTop = "0.25rem";
+      saveBtn.addEventListener("click", () => {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+
+        const map      = loadUserPresets();
+        const existing = Object.values(map).find(p => p.label.toLowerCase() === name.toLowerCase());
+
+        if (existing) {
+          // Duplicate name — ask to overwrite
+          if (saveStatus.dataset.awaitingOverwrite === "1") {
+            // Second click — overwrite confirmed
+            const preset = captureCurrentAsPreset(name);
+            if (!preset) return;
+            // Keep the existing ID so it replaces in-place
+            preset.id = existing.id;
+            map[preset.id] = preset;
+            saveUserPresets(map);
+            nameInput.value = "";
+            saveStatus.textContent = "";
+            saveStatus.dataset.awaitingOverwrite = "";
+            renderDrawerPanel("presets");
+          } else {
+            // First click — warn
+            saveStatus.textContent = `"${name}" already exists. Click Save again to overwrite.`;
+            saveStatus.style.color = "#f59e0b";
+            saveStatus.dataset.awaitingOverwrite = "1";
+            setTimeout(() => {
+              saveStatus.textContent = "";
+              saveStatus.dataset.awaitingOverwrite = "";
+            }, 4000);
+          }
+        } else {
+          // No conflict — save normally
+          const preset = captureCurrentAsPreset(name);
+          if (!preset) return;
+          map[preset.id] = preset;
+          saveUserPresets(map);
+          nameInput.value = "";
+          saveStatus.textContent = "";
+          saveStatus.dataset.awaitingOverwrite = "";
+          renderDrawerPanel("presets");
+        }
+      });
+      saveSection.appendChild(saveBtn);
+    }
+
+    container.appendChild(saveSection);
+
+    // ── IMPORT ────────────────────────────────────────────────────────────────
+    const divider3 = document.createElement("div");
+    divider3.className = "panel-divider";
+    container.appendChild(divider3);
+
+    const importSection = panelSection("IMPORT PRESET FROM JSON");
+    const importHint = document.createElement("div");
+    importHint.className   = "panel-hint";
+    importHint.textContent = "Import a preset shared by a colleague.";
+    importSection.appendChild(importHint);
+
+    const importBtn = document.createElement("button");
+    importBtn.className   = "btn btn-ghost";
+    importBtn.textContent = "⬇ Import JSON…";
+    importBtn.style.marginTop = "0.2rem";
+    importBtn.addEventListener("click", () => {
+      const fileInput = document.createElement("input");
+      fileInput.type   = "file";
+      fileInput.accept = ".json";
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const p = JSON.parse(e.target.result);
+            if (!p.id || !p.label || !p.keepFields) throw new Error("Invalid preset file.");
+            // Assign a new ID to avoid collision
+            p.id = `user_${Date.now()}`;
+            p.isUserPreset = true;
+            const map = loadUserPresets();
+            map[p.id] = p;
+            saveUserPresets(map);
+            renderDrawerPanel("presets");
+          } catch (err) {
+            alert(`Could not import preset: ${err.message}`);
+          }
+        };
+        reader.readAsText(file);
+      });
+      fileInput.click();
+    });
+    importSection.appendChild(importBtn);
+    container.appendChild(importSection);
+
+    // ── ACTIVE PRESET STATUS ──────────────────────────────────────────────────
+    const divider4 = document.createElement("div");
+    divider4.className = "panel-divider";
+    container.appendChild(divider4);
 
     const statusSection = panelSection("ACTIVE PRESET");
     if (viewState.activePreset) {
-      const p = presets[viewState.activePreset];
+      const allPresets = { ...presets, ...loadUserPresets() };
+      const p = allPresets[viewState.activePreset];
       const badge = document.createElement("div");
       badge.className   = "panel-status";
       badge.textContent = `✓ ${p?.label || viewState.activePreset}`;
@@ -835,7 +1135,38 @@
     container.appendChild(statusSection);
   }
 
-  // Value mapping panel
+  function applyUserPreset(preset) {
+    if (!parsedData) return;
+    const keepSet   = new Set(preset.keepFields);
+    const effective = parsedData.fields.filter(f => keepSet.has(f));
+    viewState.visibleFields = effective;
+
+    // Apply all stored display names (full map, not just deltas)
+    effective.forEach(f => {
+      viewState.displayNames[f] = (preset.renameFields && preset.renameFields[f]) || f;
+    });
+
+    if (preset.valueMapping) {
+      applyValueMappings(preset.valueMapping, true);
+    }
+
+    viewState.activePreset = preset.id;
+    updateFileInfo();
+    renderTablePreview();
+    renderSummaryPanel();
+  }
+
+  function exportPresetAsJson(preset) {
+    const blob = new Blob([JSON.stringify(preset, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `${preset.label.replace(/\s+/g, "-").toLowerCase()}-preset.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
   function buildMappingPanel(container) {
     if (!parsedData) {
       noDataMessage(container, "Load a file to configure value mappings.");
