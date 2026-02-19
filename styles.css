@@ -305,25 +305,58 @@ body {
   overflow: hidden;
 }
 
-/* Toolbar — also doubles as the drop target */
-.csv-toolbar {
+/* Row 1: Load button + inline drop zone */
+.csv-load-row {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.csv-load-row .btn {
+  border-radius: 0;
+  border-right: 1px solid rgba(148, 163, 184, 0.15);
+  padding: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  background: rgba(15, 23, 42, 0.8);
+}
+.csv-load-row .btn:hover {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+/* Drop zone — fills remaining space in row 1 */
+.csv-dropzone {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.6rem 0.85rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-  background: rgba(15, 23, 42, 0.7);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  min-height: 48px;
-  transition: background 0.15s, border-color 0.15s;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  background: rgba(15, 23, 42, 0.3);
+  font-size: 0.82rem;
+  color: #4b5563;
+  cursor: default;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
 }
-.csv-toolbar.dragover {
-  background: rgba(22, 163, 74, 0.07);
-  border-bottom-color: rgba(34, 197, 94, 0.4);
-}
-.csv-toolbar.dragover .csv-no-file {
+.csv-dropzone.dragover {
+  background: rgba(22, 163, 74, 0.08);
   color: #86efac;
+}
+.dropzone-icon { font-size: 1rem; flex-shrink: 0; opacity: 0.5; }
+.csv-dropzone.dragover .dropzone-icon { opacity: 1; }
+
+/* Row 2: File info + preset badge + export actions */
+.csv-infobar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(15, 23, 42, 0.5);
+  min-height: 36px;
 }
 
 /* Drop zone — removed as separate element, toolbar is now the target */
@@ -369,7 +402,70 @@ body {
   gap: 0.4rem;
   align-items: center;
   flex-shrink: 0;
+  margin-left: auto;
 }
+
+/* Search bar */
+.csv-searchbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  background: rgba(15, 23, 42, 0.4);
+  min-height: 40px;
+}
+.search-icon {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-family: inherit;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e5e7eb;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.search-input:focus {
+  border-color: rgba(96, 165, 250, 0.5);
+}
+.search-input::placeholder {
+  color: #374151;
+}
+.search-field-select {
+  font-size: 0.72rem;
+  font-family: inherit;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  color: #9ca3af;
+  outline: none;
+  flex-shrink: 0;
+  max-width: 140px;
+}
+.search-clear {
+  border: none;
+  background: transparent;
+  color: #4b5563;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.1rem 0.25rem;
+  border-radius: 0.3rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  transition: color 0.12s;
+}
+.search-clear:hover { color: #f87171; }
 
 /* Workspace: rail + drawer + content */
 .csv-workspace {
@@ -687,6 +783,7 @@ body {
   text-overflow: ellipsis;
   max-width: 240px;
   color: #cbd5e1;
+  cursor: pointer;
 }
 .data-table tbody tr:hover td { background: rgba(55, 65, 81, 0.15); }
 .data-table tr.annotated td { background: rgba(34, 197, 94, 0.04); }
@@ -694,13 +791,26 @@ body {
   color: #4ade80;
   font-style: italic;
 }
-.data-table td[contenteditable="true"] {
+
+/* Inline cell editor */
+.cell-edit-input {
+  width: 100%;
+  min-width: 80px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  padding: 0.1rem 0.25rem;
+  border: 1px solid rgba(96, 165, 250, 0.6);
+  border-radius: 0.25rem;
+  background: rgba(15, 23, 42, 0.95);
+  color: #e5e7eb;
   outline: none;
-  min-width: 120px;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.15);
 }
-.data-table td[contenteditable="true"]:focus {
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.4);
+
+/* Protected (read-only) cells */
+.data-table td.cell-protected {
+  cursor: default;
+  color: #6b7280;
 }
 .csv-empty-state {
   display: flex;

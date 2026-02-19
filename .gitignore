@@ -4,12 +4,21 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Local-only stuff
-test files/
-*.log
+# Obsidian vault files
+.obsidian/
+
+# Internal docs — not for the repo
 HANDOFF.md
 SecOps Workbench – Project Plan.md
+PB Tools – Project Plan.md
+projectdocs/
 
-# Build/output (if you add any later)
+# Test data — never commit real or dummy data
+test files/
+
+# Logs
+*.log
+
+# Build/output (if added later)
 dist/
 node_modules/

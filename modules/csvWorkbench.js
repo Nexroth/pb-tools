@@ -4,10 +4,22 @@
 
 (function () {
   const CONTAINER_ID  = "moduleContainer";
-  const ANNOTATION_KEY = "pbToolsAnnotations";
-  const PERSON_KEY_COL  = "EmployeeID";
-  const CAMPAIGN_KEY_COL = "Campaign";
-  const NOTE_COL        = "StatusNote";
+  const ANNOTATION_KEY   = "pbToolsAnnotations";
+  const NOTE_COL         = "StatusNote";
+  // Annotation key: Email (unique per person) + Original Due Date (UTC) (scopes to campaign)
+  // Falls back to Employee Number if Email is missing
+  const KEY_COL_PRIMARY   = "Email";
+  const KEY_COL_SECONDARY = "Employee Number";  // raw field name, pre-rename
+  const KEY_COL_DATE      = "Original Due Date (UTC)";
+
+  // Columns that are read-only — unique identifiers that should never be accidentally edited
+  const PROTECTED_COLS = new Set([
+    "Email",
+    "Manager Email",
+    "Employee Number",
+    "EmployeeID",                // post-rename alias
+    "Original Due Date (UTC)",   // used as campaign ID for annotation matching
+  ]);
 
   // ── Module meta ───────────────────────────────────────────────────────────
   const meta = {
@@ -21,6 +33,7 @@
   let viewState     = { visibleFields: [], displayNames: {}, activePreset: null };
   let lastSummary   = null;   // { field, rows: [{ value, count }] }
   let sortState     = { field: null, dir: "asc" };
+  let filterState   = { text: "", field: "" };  // "" field = search all columns
 
   // ── Drawer state ──────────────────────────────────────────────────────────
   let drawerState   = { open: false, panel: null };
@@ -58,10 +71,10 @@
   }
 
   function makeAnnotationKey(row) {
-    const p = row[PERSON_KEY_COL];
-    const c = row[CAMPAIGN_KEY_COL];
-    if (!p || !c) return null;
-    return `${p}::${c}`;
+    const person = row[KEY_COL_PRIMARY] || row[KEY_COL_SECONDARY];
+    const date   = row[KEY_COL_DATE];
+    if (!person || !date) return null;
+    return `${String(person).trim().toLowerCase()}::${String(date).trim()}`;
   }
 
   // ── Presets ───────────────────────────────────────────────────────────────
@@ -69,19 +82,41 @@
     phisherLike: {
       id: "phisherLike",
       label: "PhishER Fail Export",
-      description: "Filters to core identity columns, renames Employee Number → EmployeeID, and normalizes SBU values in Custom Field 1.",
+      description: "Filters to core identity columns, renames Employee Number → EmployeeID, normalizes SBU values, and derives SBU from Location for blank rows.",
       keepFields: [
         "Email", "First Name", "Last Name", "Job Title",
         "Group", "Manager Name", "Manager Email", "Location",
         "Employee Number", "Content", "Department", "Custom Field 1",
       ],
       renameFields: { "Employee Number": "EmployeeID", "Custom Field 1": "SBU" },
+      // Step 1: explicit value mappings on Custom Field 1 (raw field name, before rename)
       valueMapping: {
         "Custom Field 1": {
           "2101 Centerstone of Indiana*": "Indiana",
-          // add more SBU mappings here
+          // add more explicit SBU mappings here as needed
         },
       },
+      // Step 2: if SBU still blank, derive from first 2 chars of Location field
+      locationPrefixToSbu: {
+        "TN": "Tennessee",
+        "IN": "Indiana",
+        "IL": "Illinois",
+        "FL": "Florida",
+        "KY": "Kentucky",
+        "OH": "Ohio",
+        "GA": "Georgia",
+        "NC": "North Carolina",
+        "TX": "Texas",
+        "MO": "Missouri",
+        "VA": "Virginia",
+        "CO": "Colorado",
+        "AZ": "Arizona",
+        "CA": "California",
+        "WA": "Washington",
+        "PA": "Pennsylvania",
+        "NY": "New York",
+      },
+      // Step 3: if Location prefix also unknown, fall back to this
       sbuFallbackForEmpty: "blank",
     },
   };
@@ -119,8 +154,8 @@
 
   function applyPhisherLikePreset() {
     if (!parsedData) return;
-    const preset   = presets.phisherLike;
-    const keepSet  = new Set(preset.keepFields);
+    const preset    = presets.phisherLike;
+    const keepSet   = new Set(preset.keepFields);
     const effective = parsedData.fields.filter(f => keepSet.has(f));
 
     viewState.visibleFields = effective;
@@ -135,18 +170,33 @@
       if (viewState.displayNames[from] !== undefined) viewState.displayNames[from] = to;
     });
 
-    // Apply value mappings
+    // Step 1: explicit value mappings (runs on raw field name before rename)
     applyValueMappings(preset.valueMapping);
 
-    // SBU fallback for empty
-    const sbuKey = parsedData.fields.includes("Custom Field 1") ? "Custom Field 1"
-                 : parsedData.fields.includes("SBU") ? "SBU" : null;
-    if (sbuKey && preset.sbuFallbackForEmpty !== undefined) {
+    // Step 2 & 3: for rows where SBU is still blank, derive from Location prefix
+    const sbuKey      = parsedData.fields.includes("Custom Field 1") ? "Custom Field 1"
+                      : parsedData.fields.includes("SBU") ? "SBU" : null;
+    const locationKey = parsedData.fields.includes("Location") ? "Location" : null;
+
+    if (sbuKey) {
+      const locMap = preset.locationPrefixToSbu || {};
       parsedData.rows.forEach(row => {
         const v = row[sbuKey];
-        if (v === null || v === undefined || String(v).trim() === "") {
-          row[sbuKey] = preset.sbuFallbackForEmpty;
+        const isEmpty = v === null || v === undefined || String(v).trim() === "";
+        if (!isEmpty) return;
+
+        // Step 2: try to derive from Location
+        if (locationKey) {
+          const loc    = String(row[locationKey] || "").trim();
+          const prefix = loc.substring(0, 2).toUpperCase();
+          if (prefix && locMap[prefix]) {
+            row[sbuKey] = locMap[prefix];
+            return;
+          }
         }
+
+        // Step 3: fallback
+        row[sbuKey] = preset.sbuFallbackForEmpty;
       });
     }
 
@@ -184,6 +234,20 @@
       const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
       return dir === "asc" ? cmp : -cmp;
     });
+  }
+
+  function getFilteredSortedRows() {
+    const sorted = getSortedRows();
+    const needle = filterState.text.trim().toLowerCase();
+    if (!needle) return sorted;
+
+    const fields = filterState.field
+      ? [filterState.field]
+      : getEffectiveFields();
+
+    return sorted.filter(row =>
+      fields.some(f => String(row[f] ?? "").toLowerCase().includes(needle))
+    );
   }
 
   // ── File handling ─────────────────────────────────────────────────────────
@@ -245,6 +309,7 @@
     parsedData  = { fields, rows: rawRows };
     lastSummary = null;
     sortState   = { field: null, dir: "asc" };
+    filterState = { text: "", field: "" };
 
     viewState.visibleFields  = [...fields];
     viewState.displayNames   = {};
@@ -253,6 +318,14 @@
 
     updateFileInfo();
     updateDownloadBtn();
+
+    // Reset search UI on new file
+    const si = document.getElementById("csvSearchInput");
+    const sf = document.getElementById("csvSearchField");
+    const sc = document.getElementById("csvSearchClear");
+    if (si) si.value = "";
+    if (sc) sc.style.display = "none";
+    if (sf) populateSearchFieldSelect(sf);
 
     // Refresh whatever drawer is open
     if (drawerState.open && drawerState.panel) {
@@ -337,15 +410,21 @@
     container.innerHTML = `
       <div class="csv-module">
 
-        <!-- Toolbar / drop zone (combined) -->
-        <div class="csv-toolbar" id="csvDropzone">
-          <button class="btn btn-secondary" id="csvFileButton" style="padding:0.3rem 0.6rem;font-size:0.75rem;flex-shrink:0;">
+        <!-- Row 1: Load button + inline drop zone -->
+        <div class="csv-load-row">
+          <button class="btn btn-secondary" id="csvFileButton" style="padding:0.3rem 0.7rem;font-size:0.75rem;flex-shrink:0;">
             📂 Load file
           </button>
           <input type="file" id="csvFileInput" accept=".csv,.txt,.xlsx" style="display:none">
+          <div class="csv-dropzone" id="csvDropzone">
+            <span class="dropzone-icon">⬇</span>
+            <span class="dropzone-label">Drop a <strong>CSV</strong> or <strong>XLSX</strong> file here to load or merge</span>
+          </div>
+        </div>
 
+        <!-- Row 2: File info + preset badge + export actions -->
+        <div class="csv-infobar" id="csvInfoBar">
           <div class="csv-file-info" id="csvFileInfo"></div>
-
           <div class="csv-toolbar-actions">
             <button class="btn btn-secondary" id="csvDownloadBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;" disabled>
               ↓ CSV
@@ -356,10 +435,26 @@
           </div>
         </div>
 
+        <!-- Row 3: Search bar -->
+        <div class="csv-searchbar" id="csvSearchBar">
+          <span class="search-icon">🔍</span>
+          <input
+            type="text"
+            id="csvSearchInput"
+            class="search-input"
+            placeholder="Search across all columns…"
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <select id="csvSearchField" class="search-field-select">
+            <option value="">All columns</option>
+          </select>
+          <button class="search-clear" id="csvSearchClear" title="Clear search" style="display:none;">✕</button>
+        </div>
+
         <!-- Workspace: rail | drawer | content -->
         <div class="csv-workspace">
 
-          <!-- Operation icon rail -->
           <div class="ops-rail" id="opsRail">
             ${Object.entries(PANEL_ICONS).map(([key, icon]) => `
               <button class="rail-btn" data-panel="${key}" title="${PANEL_LABELS[key]}">
@@ -416,7 +511,7 @@
       });
     }
 
-    // Drop zone
+    // Drop zone — drag and drop only, no click
     const dz = root.querySelector("#csvDropzone");
     if (dz) {
       dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("dragover"); });
@@ -427,8 +522,6 @@
         const f = e.dataTransfer.files?.[0];
         if (f) handleFile(f);
       });
-      // Also allow clicking the dropzone to open file picker
-      dz.addEventListener("click", () => { fileInput?.click(); });
     }
 
     // CSV quick-download
@@ -453,6 +546,53 @@
     // Drawer close button
     const closeBtn = root.querySelector("#opsDrawerClose");
     if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+
+    // Search bar
+    const searchInput  = root.querySelector("#csvSearchInput");
+    const searchField  = root.querySelector("#csvSearchField");
+    const searchClear  = root.querySelector("#csvSearchClear");
+
+    if (searchInput) {
+      searchInput.value = filterState.text;
+      searchInput.addEventListener("input", () => {
+        filterState.text = searchInput.value;
+        if (searchClear) searchClear.style.display = filterState.text ? "flex" : "none";
+        renderTablePreview();
+      });
+    }
+
+    if (searchField) {
+      populateSearchFieldSelect(searchField);
+      searchField.value = filterState.field;
+      searchField.addEventListener("change", () => {
+        filterState.field = searchField.value;
+        renderTablePreview();
+      });
+    }
+
+    if (searchClear) {
+      if (filterState.text) searchClear.style.display = "flex";
+      searchClear.addEventListener("click", () => {
+        filterState.text  = "";
+        filterState.field = "";
+        if (searchInput) searchInput.value = "";
+        if (searchField) searchField.value = "";
+        searchClear.style.display = "none";
+        renderTablePreview();
+      });
+    }
+  }
+
+  function populateSearchFieldSelect(select) {
+    // Keep the "All columns" option, clear the rest
+    while (select.options.length > 1) select.remove(1);
+    if (!parsedData) return;
+    getEffectiveFields().forEach(f => {
+      const opt       = document.createElement("option");
+      opt.value       = f;
+      opt.textContent = viewState.displayNames[f] || f;
+      select.appendChild(opt);
+    });
   }
 
   // ── Drawer control ────────────────────────────────────────────────────────
@@ -503,27 +643,27 @@
 
     if (overrideText) {
       const span = document.createElement("span");
-      span.className    = "csv-no-file";
-      span.textContent  = overrideText;
+      span.className   = "csv-no-file";
+      span.textContent = overrideText;
       el.appendChild(span);
       return;
     }
 
     if (!parsedData || !currentFile) {
       const span = document.createElement("span");
-      span.className    = "csv-no-file";
-      span.textContent  = "No file loaded — drop a file anywhere here or click Load";
+      span.className   = "csv-no-file";
+      span.textContent = "No file loaded";
       el.appendChild(span);
       return;
     }
 
     const nameSpan = document.createElement("span");
-    nameSpan.className    = "csv-file-name";
-    nameSpan.textContent  = currentFile.name;
+    nameSpan.className   = "csv-file-name";
+    nameSpan.textContent = currentFile.name;
 
     const metaSpan = document.createElement("span");
-    metaSpan.className    = "csv-file-meta";
-    metaSpan.textContent  = `${parsedData.rows.length.toLocaleString()} rows · ${parsedData.fields.length} cols`;
+    metaSpan.className   = "csv-file-meta";
+    metaSpan.textContent = `${parsedData.rows.length.toLocaleString()} rows · ${parsedData.fields.length} cols`;
 
     el.appendChild(nameSpan);
     el.appendChild(metaSpan);
@@ -899,15 +1039,25 @@
     }
 
     const fields      = getEffectiveFields();
-    const sortedRows  = getSortedRows();
+    const filteredRows = getFilteredSortedRows();
     const MAX_ROWS    = 500;
-    const previewRows = sortedRows.slice(0, MAX_ROWS);
+    const previewRows = filteredRows.slice(0, MAX_ROWS);
 
     const info = document.createElement("div");
-    info.className   = "csv-table-info";
-    info.textContent = sortedRows.length > MAX_ROWS
-      ? `Showing first ${MAX_ROWS.toLocaleString()} of ${sortedRows.length.toLocaleString()} rows.`
-      : `${sortedRows.length.toLocaleString()} row${sortedRows.length !== 1 ? "s" : ""}`;
+    info.className = "csv-table-info";
+    const total = parsedData.rows.length;
+    const shown = filteredRows.length;
+    if (filterState.text) {
+      info.textContent = previewRows.length < shown
+        ? `${shown.toLocaleString()} matches (showing first ${MAX_ROWS}) of ${total.toLocaleString()} rows`
+        : `${shown.toLocaleString()} of ${total.toLocaleString()} rows match`;
+      info.style.color = shown === 0 ? "#f87171" : "#60a5fa";
+    } else {
+      info.textContent = shown > MAX_ROWS
+        ? `Showing first ${MAX_ROWS.toLocaleString()} of ${shown.toLocaleString()} rows.`
+        : `${shown.toLocaleString()} row${shown !== 1 ? "s" : ""}`;
+      info.style.color = "";
+    }
     container.appendChild(info);
 
     const tableWrap = document.createElement("div");
@@ -960,31 +1110,67 @@
       fields.forEach(field => {
         const td  = document.createElement("td");
         const val = row[field];
+        const displayVal = val == null ? "" : String(val);
+        const isProtected = PROTECTED_COLS.has(field);
 
-        if (field === NOTE_COL) {
-          td.contentEditable = "true";
-          td.spellcheck      = false;
-          td.className       = "cell-note";
-          td.textContent     = (val == null ? "" : String(val));
-
-          td.addEventListener("blur", () => {
-            const newVal = td.textContent.trim();
-            if (dataIdx >= 0) parsedData.rows[dataIdx][NOTE_COL] = newVal;
-
-            const key = makeAnnotationKey(row);
-            if (key) {
-              const ann = loadAnnotations();
-              if (!ann[key]) ann[key] = {};
-              ann[key].statusNote = newVal;
-              annotationsCache = ann;
-              saveAnnotations();
-            }
-
-            tr.classList.toggle("annotated", !!newVal);
-          });
-        } else {
-          td.textContent = (val == null ? "" : String(val));
+        td.textContent = displayVal;
+        if (field === NOTE_COL) td.classList.add("cell-note");
+        if (isProtected) {
+          td.classList.add("cell-protected");
+          td.title = "This column is read-only";
+          tr.appendChild(td);
+          return;
         }
+
+        td.addEventListener("click", () => {
+          if (td.querySelector("input")) return; // already editing
+          const original = td.textContent;
+
+          const input = document.createElement("input");
+          input.type       = "text";
+          input.value      = original;
+          input.className  = "cell-edit-input";
+          input.spellcheck = false;
+
+          td.textContent = "";
+          td.appendChild(input);
+          input.focus();
+          input.select();
+
+          function commit() {
+            const newVal = input.value;
+            td.textContent = newVal;
+            if (field === NOTE_COL) td.classList.add("cell-note");
+
+            // Write back to parsedData
+            if (dataIdx >= 0) parsedData.rows[dataIdx][field] = newVal;
+
+            // For StatusNote, also persist annotation
+            if (field === NOTE_COL) {
+              const key = makeAnnotationKey(row);
+              if (key) {
+                const ann = loadAnnotations();
+                if (!ann[key]) ann[key] = {};
+                ann[key].statusNote = newVal;
+                annotationsCache = ann;
+                saveAnnotations();
+              }
+              tr.classList.toggle("annotated", !!newVal.trim());
+            }
+          }
+
+          function cancel() {
+            td.textContent = original;
+            if (field === NOTE_COL) td.classList.add("cell-note");
+          }
+
+          input.addEventListener("keydown", e => {
+            if (e.key === "Enter")  { e.preventDefault(); commit(); }
+            if (e.key === "Escape") { e.preventDefault(); cancel(); }
+          });
+
+          input.addEventListener("blur", () => commit());
+        });
 
         tr.appendChild(td);
       });
