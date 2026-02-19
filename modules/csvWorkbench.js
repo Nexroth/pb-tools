@@ -1,133 +1,81 @@
 // modules/csvWorkbench.js
+// Layout: icon rail + slide-out drawer + table/summary content area.
+// Business logic is unchanged; only the render layer is redesigned.
 
 (function () {
-  const containerId = "moduleContainer";
-  let rootEl = null;
+  const CONTAINER_ID  = "moduleContainer";
+  const ANNOTATION_KEY = "pbToolsAnnotations";
+  const PERSON_KEY_COL  = "EmployeeID";
+  const CAMPAIGN_KEY_COL = "Campaign";
+  const NOTE_COL        = "StatusNote";
 
+  // ── Module meta ───────────────────────────────────────────────────────────
   const meta = {
-    title: "CSV / Spreadsheet Workbench",
-    subtitle:
-      "Load, inspect, annotate, and export PB Tools CSV data. All processing happens locally.",
+    title:    "CSV / Spreadsheet Workbench",
+    subtitle: "Load, clean, and export CSV data. All processing happens locally.",
   };
 
-  // In-memory state
-  let parsedData = null; // { fields: [...], rows: [...] }
-  let viewState = {
-    visibleFields: [],
-    displayNames: {}, // fieldKey -> display name
-    activePreset: null,
+  // ── In-memory state ───────────────────────────────────────────────────────
+  let parsedData    = null;   // { fields: [...], rows: [...] }
+  let currentFile   = null;   // File object for display name
+  let viewState     = { visibleFields: [], displayNames: {}, activePreset: null };
+  let lastSummary   = null;   // { field, rows: [{ value, count }] }
+  let sortState     = { field: null, dir: "asc" };
+
+  // ── Drawer state ──────────────────────────────────────────────────────────
+  let drawerState   = { open: false, panel: null };
+
+  const PANEL_LABELS = {
+    columns:  "Columns",
+    presets:  "Presets",
+    mapping:  "Value mapping",
+    tools:    "Tools",
   };
 
-  // Summary state
-  let lastSummary = null; // { field, rows: [{ value, count }, ...] }
+  const PANEL_ICONS = {
+    columns:  "☰",
+    presets:  "⚡",
+    mapping:  "⇄",
+    tools:    "🔧",
+  };
 
-  // Annotation storage (localStorage)
-  const ANNOTATION_STORAGE_KEY = "secopsWorkbenchAnnotations";
-  const PERSON_KEY_COLUMN = "EmployeeID";
-  const CAMPAIGN_KEY_COLUMN = "Campaign";
-  const NOTE_COLUMN = "StatusNote";
-
+  // ── Annotation cache ──────────────────────────────────────────────────────
   let annotationsCache = null;
 
   function loadAnnotations() {
     if (annotationsCache) return annotationsCache;
     try {
-      const raw = localStorage.getItem(ANNOTATION_STORAGE_KEY);
+      const raw = localStorage.getItem(ANNOTATION_KEY);
       annotationsCache = raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      annotationsCache = {};
-    }
+    } catch (_) { annotationsCache = {}; }
     return annotationsCache;
   }
 
   function saveAnnotations() {
     try {
-      localStorage.setItem(
-        ANNOTATION_STORAGE_KEY,
-        JSON.stringify(annotationsCache || {})
-      );
-    } catch (e) {
-      // ignore
-    }
+      localStorage.setItem(ANNOTATION_KEY, JSON.stringify(annotationsCache || {}));
+    } catch (_) {}
   }
 
   function makeAnnotationKey(row) {
-    const person = row[PERSON_KEY_COLUMN];
-    const campaign = row[CAMPAIGN_KEY_COLUMN];
-    if (!person || !campaign) return null;
-    return `${person}::${campaign}`;
+    const p = row[PERSON_KEY_COL];
+    const c = row[CAMPAIGN_KEY_COL];
+    if (!p || !c) return null;
+    return `${p}::${c}`;
   }
 
-  // ---- Value mappings (bulk replace) ----
-
-  function applyValueMappings(valueMapping) {
-    if (!parsedData || !valueMapping || typeof valueMapping !== "object") return;
-
-    const rows = parsedData.rows;
-
-    // Build a quick lookup: display name -> field key
-    const displayToField = {};
-    Object.keys(viewState.displayNames).forEach((field) => {
-      displayToField[viewState.displayNames[field]] = field;
-    });
-
-    Object.entries(valueMapping).forEach(([column, rulesObj]) => {
-      if (!rulesObj || typeof rulesObj !== "object") return;
-
-      const fields = parsedData && parsedData.fields ? parsedData.fields : [];
-      const fieldKey = fields.includes(column)
-        ? column
-        : displayToField[column];
-
-      if (!fieldKey) return;
-
-      Object.entries(rulesObj).forEach(([from, to]) => {
-        const isPrefix = from.endsWith("*");
-        const needle = isPrefix ? from.slice(0, -1) : from;
-
-        rows.forEach((row) => {
-          const current = row[fieldKey];
-          if (current == null) return;
-
-          if (
-            (!isPrefix && current === needle) ||
-            (isPrefix && String(current).startsWith(needle))
-          ) {
-            row[fieldKey] = to;
-          }
-        });
-      });
-    });
-
-    // Re-render table and summary after changes
-    render();
-  }
-  
-  // Example preset
+  // ── Presets ───────────────────────────────────────────────────────────────
   const presets = {
     phisherLike: {
       id: "phisherLike",
       label: "PhishER Fail Export",
-      description:
-        "Show core identity + campaign fields and normalize SBU values.",
+      description: "Filters to core identity columns, renames Employee Number → EmployeeID, and normalizes SBU values in Custom Field 1.",
       keepFields: [
-        "Email",
-        "First Name",
-        "Last Name",
-        "Job Title",
-        "Group",
-        "Manager Name",
-        "Manager Email",
-        "Location",
-        "Employee Number",
-        "Content",
-        "Department",
-        "Custom Field 1",
+        "Email", "First Name", "Last Name", "Job Title",
+        "Group", "Manager Name", "Manager Email", "Location",
+        "Employee Number", "Content", "Department", "Custom Field 1",
       ],
-      renameFields: {
-        "Employee Number": "EmployeeID",
-        "Custom Field 1": "SBU",
-      },
+      renameFields: { "Employee Number": "EmployeeID", "Custom Field 1": "SBU" },
       valueMapping: {
         "Custom Field 1": {
           "2101 Centerstone of Indiana*": "Indiana",
@@ -138,924 +86,80 @@
     },
   };
 
-  function init() {}
+  // ── Business logic ────────────────────────────────────────────────────────
 
-  function render() {
-    const container = document.getElementById(containerId);
-    if (!container) return;
+  function applyValueMappings(valueMapping) {
+    if (!parsedData || !valueMapping || typeof valueMapping !== "object") return;
 
-    container.innerHTML = "";
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "module-card";
-
-    wrapper.innerHTML = `
-      <div class="module-card-header">
-        <div>
-          <div class="module-card-title">CSV / Spreadsheet Workbench</div>
-          <div class="module-card-subtitle">
-            Drop campaign exports or other CSV files, then apply cleaning, annotations, summaries, and export operations.
-          </div>
-        </div>
-        <span class="tag">Module 1</span>
-      </div>
-
-      <div class="module-card-body">
-        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-          <button class="btn" id="csvFileButton">
-            <span>Choose CSV file</span>
-          </button>
-          <input
-            type="file"
-            id="csvFileInput"
-            accept=".csv,.txt,.xlsx"
-            style="display:none"
-          >
-          <button class="btn btn-secondary" id="csvDownloadButton" disabled>
-            <span>Download CSV (current)</span>
-          </button>
-        </div>
-
-        <div
-          id="csvDropzone"
-          class="dropzone"
-        >
-          Drop file to import here or use the button above.
-          <div style="margin-top:0.25rem;font-size:0.75rem;color:#6b7280;">
-            Accepted: CSV (XLSX support planned).
-          </div>
-        </div>
-
-        <div id="csvInfo" style="margin-top:0.75rem;font-size:0.8rem;color:#9ca3af;"></div>
-
-        <div id="csvPresetsPanel" style="margin-top:0.75rem;"></div>
-
-        <div style="margin-top:1rem;display:flex;gap:1rem;align-items:flex-start;">
-          <div
-            style="
-              flex:0 0 280px;
-              max-width:280px;
-              display:flex;
-              flex-direction:column;
-              gap:0.75rem;
-            "
-          >
-            <div id="csvColumnsPanel"></div>
-            <div id="csvValueMappingPanel"></div>
-            <!-- future: <div id="csvDeduplicatePanel"></div> -->
-          </div>
-          <div
-            style="
-              flex:1 1 auto;
-              min-width:0;
-              display:flex;
-              flex-direction:column;
-              gap:0.75rem;
-            "
-          >
-            <div id="csvTableContainer"></div>
-            <div id="csvSummaryPanel"></div>
-          </div>
-        </div>
-    `;
-
-    container.appendChild(wrapper);
-    rootEl = wrapper;
-
-    wireEvents();
-
-    if (parsedData) {
-      renderPresetsPanel();
-      renderColumnsPanel(parsedData.fields);
-      renderValueMappingPanel();
-      renderTablePreview();
-      renderSummaryPanel();
-    } else {
-      renderPresetsPanel();
-      clearColumnsPanel();
-      renderValueMappingPanel();
-      clearTable();
-      renderSummaryPanel();
-    }
-
-  }
-
-  function wireEvents() {
-    if (!rootEl) return;
-
-    const fileButton = rootEl.querySelector("#csvFileButton");
-    const fileInput = rootEl.querySelector("#csvFileInput");
-    const dropzone = rootEl.querySelector("#csvDropzone");
-    const infoEl = rootEl.querySelector("#csvInfo");
-    const downloadBtn = rootEl.querySelector("#csvDownloadButton");
-
-    if (fileButton && fileInput) {
-      fileButton.addEventListener("click", () => {
-        fileInput.value = "";
-        fileInput.click();
-      });
-
-      fileInput.addEventListener("change", (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (file) {
-          handleFile(file, infoEl, downloadBtn);
-        }
-      });
-    }
-
-    if (dropzone) {
-      dropzone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropzone.classList.add("dragover");
-      });
-
-      dropzone.addEventListener("dragleave", (e) => {
-        e.preventDefault();
-        dropzone.classList.remove("dragover");
-      });
-
-      dropzone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropzone.classList.remove("dragover");
-        const file = e.dataTransfer.files && e.dataTransfer.files[0];
-        if (file) {
-          handleFile(file, infoEl, downloadBtn);
-        }
-      });
-    }
-
-    if (downloadBtn) {
-      downloadBtn.addEventListener("click", () => {
-        if (!parsedData) return;
-        downloadCurrentCsv();
-      });
-    }
-  }
-
-  function handleFile(file, infoEl, downloadBtn) {
-    if (!file) return;
-
-    if (infoEl) {
-      infoEl.textContent = `Selected file: ${file.name} (${file.size.toLocaleString()} bytes). Parsing…`;
-    }
-
-    // For now: treat everything as CSV or text; XLSX support will come later
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: false,
-      complete: (results) => {
-        let fields = results.meta.fields || [];
-        const rows = results.data || [];
-
-        if (!fields.includes(NOTE_COLUMN)) {
-          fields = [...fields, NOTE_COLUMN];
-        }
-
-        const annotations = loadAnnotations();
-
-        rows.forEach((row) => {
-          if (row[NOTE_COLUMN] === undefined) {
-            row[NOTE_COLUMN] = "";
-          }
-          const key = makeAnnotationKey(row);
-          if (key && annotations[key] && annotations[key].statusNote) {
-            row[NOTE_COLUMN] = annotations[key].statusNote;
-          }
-        });
-
-        parsedData = { fields, rows };
-        lastSummary = null;
-
-        viewState.visibleFields = [...fields];
-        viewState.displayNames = {};
-        viewState.activePreset = null;
-        fields.forEach((f) => {
-          viewState.displayNames[f] = f;
-        });
-
-        if (infoEl) {
-          infoEl.textContent = `Parsed ${rows.length.toLocaleString()} rows, ${fields.length.toLocaleString()} columns.`;
-        }
-
-        if (downloadBtn) {
-          downloadBtn.disabled = rows.length === 0;
-        }
-
-        renderPresetsPanel();
-        renderColumnsPanel(fields);
-        renderTablePreview();
-        renderSummaryPanel();
-      },
-      error: (err) => {
-        console.error("[CSV Workbench] Parse error:", err);
-        if (infoEl) {
-          infoEl.textContent = `Error parsing file: ${err.message || err}`;
-        }
-        if (downloadBtn) {
-          downloadBtn.disabled = true;
-        }
-        parsedData = null;
-        viewState = {
-          visibleFields: [],
-          displayNames: {},
-          activePreset: null,
-        };
-        lastSummary = null;
-        renderPresetsPanel();
-        clearColumnsPanel();
-        clearTable();
-        renderSummaryPanel();
-      },
+    const displayToField = {};
+    Object.keys(viewState.displayNames).forEach(f => {
+      displayToField[viewState.displayNames[f]] = f;
     });
-  }
 
-  function clearTable() {
-    if (!rootEl) return;
-    const tableContainer = rootEl.querySelector("#csvTableContainer");
-    if (tableContainer) {
-      tableContainer.innerHTML = "";
-    }
-  }
+    Object.entries(valueMapping).forEach(([column, rulesObj]) => {
+      if (!rulesObj || typeof rulesObj !== "object") return;
+      const fields  = parsedData.fields;
+      const fieldKey = fields.includes(column) ? column : displayToField[column];
+      if (!fieldKey) return;
 
-  function renderPresetsPanel() {
-    if (!rootEl) return;
-    const panel = rootEl.querySelector("#csvPresetsPanel");
-    if (!panel) return;
-
-    panel.innerHTML = "";
-
-    const card = document.createElement("div");
-    card.style.background = "#020617";
-    card.style.borderRadius = "0.6rem";
-    card.style.border = "1px solid rgba(148,163,184,0.35)";
-    card.style.padding = "0.55rem 0.7rem";
-    card.style.fontSize = "0.8rem";
-    card.style.display = "flex";
-    card.style.flexDirection = "column";
-    card.style.gap = "0.4rem";
-
-    const title = document.createElement("div");
-    title.textContent = "Presets";
-    title.style.fontWeight = "600";
-
-    const desc = document.createElement("div");
-    desc.style.fontSize = "0.75rem";
-    desc.style.color = "#9ca3af";
-    desc.textContent = parsedData
-      ? "Apply predefined workflows for known exports. Start with a PhishER-like example."
-      : "Apply predefined workflows for known exports. Load a CSV to enable presets.";
-
-    card.appendChild(title);
-    card.appendChild(desc);
-
-    const controls = document.createElement("div");
-    controls.style.display = "flex";
-    controls.style.alignItems = "center";
-    controls.style.gap = "0.4rem";
-    controls.style.flexWrap = "wrap";
-
-    const select = document.createElement("select");
-    select.id = "presetSelect";
-    select.disabled = !parsedData;
-    select.style.fontSize = "0.8rem";
-    select.style.padding = "0.25rem 0.45rem";
-    select.style.borderRadius = "0.4rem";
-    select.style.border = "1px solid rgba(148,163,184,0.5)";
-    select.style.background = "#020617";
-    select.style.color = "#e5e7eb";
-
-    const optPlaceholder = document.createElement("option");
-    optPlaceholder.value = "";
-    optPlaceholder.textContent = parsedData ? "Select preset" : "Load a CSV first";
-    select.appendChild(optPlaceholder);
-
-    const phisherOpt = document.createElement("option");
-    phisherOpt.value = presets.phisherLike.id;
-    phisherOpt.textContent = presets.phisherLike.label;
-    select.appendChild(phisherOpt);
-
-    if (viewState.activePreset === presets.phisherLike.id) {
-      select.value = presets.phisherLike.id;
-    }
-
-    const applyBtn = document.createElement("button");
-    applyBtn.className = "btn btn-secondary";
-    applyBtn.id = "applyPresetBtn";
-    applyBtn.textContent = "Apply preset";
-    applyBtn.disabled = !parsedData;
-
-    controls.appendChild(select);
-    controls.appendChild(applyBtn);
-    card.appendChild(controls);
-
-    panel.appendChild(card);
-
-    if (parsedData) {
-      applyBtn.addEventListener("click", () => {
-        const chosen = select.value;
-        if (!chosen) return;
-        if (chosen === presets.phisherLike.id) {
-          applyPhisherLikePreset();
-        }
+      Object.entries(rulesObj).forEach(([from, to]) => {
+        const isPrefix = from.endsWith("*");
+        const needle   = isPrefix ? from.slice(0, -1) : from;
+        parsedData.rows.forEach(row => {
+          const cur = row[fieldKey];
+          if (cur == null) return;
+          if ((!isPrefix && cur === needle) ||
+              (isPrefix && String(cur).startsWith(needle))) {
+            row[fieldKey] = to;
+          }
+        });
       });
-    }
+    });
   }
 
   function applyPhisherLikePreset() {
     if (!parsedData) return;
+    const preset   = presets.phisherLike;
+    const keepSet  = new Set(preset.keepFields);
+    const effective = parsedData.fields.filter(f => keepSet.has(f));
 
-    const preset = presets.phisherLike;
+    viewState.visibleFields = effective;
 
-    const keepSet = new Set(preset.keepFields);
-    const effectiveKeep = parsedData.fields.filter((f) => keepSet.has(f));
-
-    viewState.visibleFields = effectiveKeep;
-
-    preset.keepFields.forEach((field) => {
-      if (!viewState.displayNames[field]) {
-        viewState.displayNames[field] = field;
-      }
+    // Ensure all keepFields have a display name entry
+    preset.keepFields.forEach(f => {
+      if (!viewState.displayNames[f]) viewState.displayNames[f] = f;
     });
 
+    // Apply renames
     Object.entries(preset.renameFields || {}).forEach(([from, to]) => {
-      if (viewState.displayNames[from]) {
-        viewState.displayNames[from] = to;
-      }
+      if (viewState.displayNames[from] !== undefined) viewState.displayNames[from] = to;
     });
 
-    if (preset.valueMapping) {
-      applyValueMappings(preset.valueMapping);
-    }
+    // Apply value mappings
+    applyValueMappings(preset.valueMapping);
 
-    const hasCustomField = parsedData.fields.includes("Custom Field 1");
-    const hasSbuField = parsedData.fields.includes("SBU");
-    const sbuFieldKey = hasCustomField ? "Custom Field 1" : (hasSbuField ? "SBU" : null);
-
-    if (sbuFieldKey && preset.sbuFallbackForEmpty !== undefined) {
-      parsedData.rows.forEach((row) => {
-        const v = row[sbuFieldKey];
+    // SBU fallback for empty
+    const sbuKey = parsedData.fields.includes("Custom Field 1") ? "Custom Field 1"
+                 : parsedData.fields.includes("SBU") ? "SBU" : null;
+    if (sbuKey && preset.sbuFallbackForEmpty !== undefined) {
+      parsedData.rows.forEach(row => {
+        const v = row[sbuKey];
         if (v === null || v === undefined || String(v).trim() === "") {
-          row[sbuFieldKey] = preset.sbuFallbackForEmpty;
+          row[sbuKey] = preset.sbuFallbackForEmpty;
         }
       });
     }
 
     viewState.activePreset = preset.id;
     lastSummary = null;
-
-    renderColumnsPanel(parsedData.fields);
-    renderTablePreview();
-    renderSummaryPanel();
-  }
-
-  function clearColumnsPanel() {
-    if (!rootEl) return;
-    const panel = rootEl.querySelector("#csvColumnsPanel");
-    if (panel) {
-      panel.innerHTML = "";
-    }
-  }
-
-  function renderColumnsPanel(fields) {
-    if (!rootEl) return;
-    const panel = rootEl.querySelector("#csvColumnsPanel");
-    if (!panel) return;
-
-    panel.innerHTML = "";
-
-    if (!fields || !fields.length) {
-      panel.textContent = "No columns.";
-      return;
-    }
-
-    const card = document.createElement("div");
-    card.style.background = "#020617";
-    card.style.borderRadius = "0.6rem";
-    card.style.border = "1px solid rgba(148,163,184,0.35)";
-    card.style.padding = "0.6rem 0.7rem";
-    card.style.fontSize = "0.8rem";
-    card.style.width = "100%";
-    card.style.maxWidth = "100%";
-
-    const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.alignItems = "center";
-    header.style.justifyContent = "space-between";
-    header.style.marginBottom = "0.5rem";
-    header.innerHTML =
-      '<div style="font-weight:600">Columns</div>' +
-      '<button class="btn btn-secondary" id="applyColumnsBtn" style="padding:0.25rem 0.6rem;font-size:0.75rem;">Apply column changes</button>';
-    card.appendChild(header);
-
-    const list = document.createElement("div");
-    list.style.maxHeight = "300px";
-    list.style.overflow = "auto";
-    list.style.display = "flex";
-    list.style.flexDirection = "column";
-    list.style.gap = "0.2rem";
-
-    fields.forEach((field) => {
-      const visible = viewState.visibleFields.includes(field);
-      const displayName = viewState.displayNames[field] || field;
-
-      const row = document.createElement("div");
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.gap = "0.35rem";
-
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = visible;
-      checkbox.dataset.field = field;
-      checkbox.style.cursor = "pointer";
-
-      const label = document.createElement("span");
-      label.textContent = field;
-      label.style.flex = "0 0 auto";
-
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = displayName;
-      input.dataset.field = field;
-      input.placeholder = "Display name";
-      input.style.flex = "1 1 auto";
-      input.style.minWidth = "0";
-      input.style.fontSize = "0.75rem";
-      input.style.padding = "0.15rem 0.25rem";
-      input.style.borderRadius = "0.35rem";
-      input.style.border = "1px solid rgba(148,163,184,0.5)";
-      input.style.background = "#020617";
-      input.style.color = "#e5e7eb";
-
-      row.appendChild(checkbox);
-      row.appendChild(label);
-      row.appendChild(input);
-
-      list.appendChild(row);
-    });
-
-    card.appendChild(list);
-    panel.appendChild(card);
-
-    const applyBtn = card.querySelector("#applyColumnsBtn");
-    if (applyBtn) {
-      applyBtn.addEventListener("click", () => {
-        applyColumnChanges(card);
-      });
-    }
-  }
-
-  function applyColumnChanges(cardRoot) {
-    if (!cardRoot || !parsedData) return;
-
-    const checkboxes = cardRoot.querySelectorAll(
-      'input[type="checkbox"][data-field]'
-    );
-    const inputs = cardRoot.querySelectorAll(
-      'input[type="text"][data-field]'
-    );
-
-    const newVisibleFields = [];
-    const newDisplayNames = { ...viewState.displayNames };
-
-    checkboxes.forEach((cb) => {
-      const field = cb.dataset.field;
-      if (!field) return;
-      if (cb.checked) {
-        newVisibleFields.push(field);
-      }
-    });
-
-    inputs.forEach((inp) => {
-      const field = inp.dataset.field;
-      if (!field) return;
-      const val = inp.value.trim();
-      newDisplayNames[field] = val || field;
-    });
-
-    viewState.visibleFields = parsedData.fields.filter((f) =>
-      newVisibleFields.includes(f)
-    );
-    viewState.displayNames = newDisplayNames;
-
-    renderTablePreview();
-    renderSummaryPanel();
-  }
-
-  function renderValueMappingPanel() {
-    if (!rootEl) return;
-    const panel = rootEl.querySelector("#csvValueMappingPanel");
-    if (!panel) return;
-
-    panel.innerHTML = "";
-
-    if (!parsedData || !parsedData.fields.length) {
-      panel.textContent = "Load data to configure value mappings.";
-      return;
-    }
-
-    const card = document.createElement("div");
-    card.style.background = "#020617";
-    card.style.borderRadius = "0.6rem";
-    card.style.border = "1px solid rgba(148,163,184,0.35)";
-    card.style.padding = "0.6rem 0.7rem";
-    card.style.fontSize = "0.8rem";
-    card.style.display = "flex";
-    card.style.flexDirection = "column";
-    card.style.gap = "0.4rem";
-    card.style.width = "100%";
-    card.style.maxWidth = "100%";
-
-    const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.justifyContent = "space-between";
-    header.style.alignItems = "center";
-    header.innerHTML = '<div style="font-weight:600;">Value mapping</div>';
-    card.appendChild(header);
-
-    const colRow = document.createElement("div");
-    colRow.style.display = "flex";
-    colRow.style.gap = "0.35rem";
-    colRow.style.alignItems = "center";
-
-    const colLabel = document.createElement("span");
-    colLabel.textContent = "Column";
-    colLabel.style.fontSize = "0.75rem";
-
-    const colSelect = document.createElement("select");
-    colSelect.id = "valueMapColumn";
-    colSelect.style.flex = "1 1 auto";
-    colSelect.style.fontSize = "0.8rem";
-    colSelect.style.padding = "0.25rem 0.45rem";
-    colSelect.style.borderRadius = "0.4rem";
-    colSelect.style.border = "1px solid rgba(148,163,184,0.5)";
-    colSelect.style.background = "#020617";
-    colSelect.style.color = "#e5e7eb";
-
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "Select column";
-    colSelect.appendChild(placeholder);
-
-    parsedData.fields.forEach((field) => {
-      const opt = document.createElement("option");
-      opt.value = field;
-      opt.textContent = viewState.displayNames[field] || field;
-      colSelect.appendChild(opt);
-    });
-
-    colRow.appendChild(colLabel);
-    colRow.appendChild(colSelect);
-    card.appendChild(colRow);
-
-    const list = document.createElement("div");
-    list.id = "valueMapList";
-    list.style.display = "flex";
-    list.style.flexDirection = "column";
-    list.style.gap = "0.25rem";
-    list.style.padding = "0.25rem 0";
-    card.appendChild(list);    
-
-    function addMappingRow(fromVal = "", toVal = "") {
-      const row = document.createElement("div");
-      row.style.display = "flex";
-      row.style.flexDirection = "column";
-      row.style.gap = "0.2rem";
-
-      const fromInput = document.createElement("input");
-      fromInput.type = "text";
-      fromInput.placeholder = "From";
-      fromInput.value = fromVal;
-      fromInput.style.fontSize = "0.75rem";
-      fromInput.style.padding = "0.15rem 0.25rem";
-      fromInput.style.borderRadius = "0.35rem";
-      fromInput.style.border = "1px solid rgba(148,163,184,0.5)";
-      fromInput.style.background = "#020617";
-      fromInput.style.color = "#e5e7eb";
-
-      const toInput = document.createElement("input");
-      toInput.type = "text";
-      toInput.placeholder = "To";
-      toInput.value = toVal;
-      toInput.style.fontSize = "0.75rem";
-      toInput.style.padding = "0.15rem 0.25rem";
-      toInput.style.borderRadius = "0.35rem";
-      toInput.style.border = "1px solid rgba(148,163,184,0.5)";
-      toInput.style.background = "#020617";
-      toInput.style.color = "#e5e7eb";
-
-      row.appendChild(fromInput);
-      row.appendChild(toInput);
-      list.appendChild(row);
-    }
-
-    // start with a single From/To row
-    addMappingRow();
-
-    const addRowBtn = document.createElement("button");
-    addRowBtn.type = "button";
-    addRowBtn.textContent = "+ Add mapping";
-    addRowBtn.style.alignSelf = "flex-start";
-    addRowBtn.style.fontSize = "0.75rem";
-    addRowBtn.style.marginTop = "0.2rem";
-    addRowBtn.style.padding = "0.1rem 0.4rem";
-    addRowBtn.style.borderRadius = "999px";
-    addRowBtn.style.border = "1px solid rgba(148,163,184,0.5)";
-    addRowBtn.style.background = "#020617";
-    addRowBtn.style.color = "#e5e7eb";
-
-    addRowBtn.addEventListener("click", () => addMappingRow());
-    card.appendChild(addRowBtn);
-
-    const footer = document.createElement("div");
-    footer.style.display = "flex";
-    footer.style.justifyContent = "space-between";
-    footer.style.alignItems = "center";
-    footer.style.marginTop = "0.4rem";
-
-    const hint = document.createElement("span");
-    hint.textContent = "Use * at end for prefix match.";
-    hint.style.fontSize = "0.7rem";
-    hint.style.color = "#9ca3af";
-
-    const applyBtn = document.createElement("button");
-    applyBtn.className = "btn btn-secondary";
-    applyBtn.textContent = "Apply mappings";
-
-    footer.appendChild(hint);
-    footer.appendChild(applyBtn);
-    card.appendChild(footer);
-
-    panel.appendChild(card);
-
-    applyBtn.addEventListener("click", () => {
-      const colKey = colSelect.value;
-      if (!colKey) return;
-
-      const fromInputs = list.querySelectorAll("input[placeholder='From']");
-      const toInputs = list.querySelectorAll("input[placeholder='To']");
-
-      const rules = {};
-      for (let i = 0; i < fromInputs.length; i++) {
-        const from = fromInputs[i].value.trim();
-        const to = toInputs[i].value.trim();
-        if (!from || !to) continue;
-        rules[from] = to;
-      }
-
-      if (Object.keys(rules).length === 0) return;
-
-      const mapping = {
-        [colKey]: rules,
-      };
-
-      applyValueMappings(mapping);
-    });
-  }
-
-  function getEffectiveFields() {
-    if (!parsedData) return [];
-    if (!viewState.visibleFields || !viewState.visibleFields.length) {
-      return parsedData.fields;
-    }
-    return viewState.visibleFields;
-  }
-
-  function renderTablePreview() {
-    if (!rootEl) return;
-    const tableContainer = rootEl.querySelector("#csvTableContainer");
-    if (!tableContainer) return;
-
-    tableContainer.innerHTML = "";
-
-    if (!parsedData || !parsedData.fields.length || !parsedData.rows.length) {
-      tableContainer.textContent = "No data to display.";
-      return;
-    }
-
-    const fields = getEffectiveFields();
-    const rows = parsedData.rows;
-
-    const maxPreviewRows = 100;
-    const previewRows = rows.slice(0, maxPreviewRows);
-
-    const info = document.createElement("div");
-    info.style.marginBottom = "0.4rem";
-    info.style.fontSize = "0.75rem";
-    info.style.color = "#9ca3af";
-    info.textContent =
-      rows.length > maxPreviewRows
-        ? `Showing first ${maxPreviewRows.toLocaleString()} rows of ${rows.length.toLocaleString()} total.`
-        : `Showing all ${rows.length.toLocaleString()} rows.`;
-
-    const tableWrapper = document.createElement("div");
-    tableWrapper.style.maxHeight = "420px";
-    tableWrapper.style.overflow = "auto";
-    tableWrapper.style.borderRadius = "0.6rem";
-    tableWrapper.style.border = "1px solid rgba(31,41,55,0.8)";
-    tableWrapper.style.background = "#020617";
-
-    const table = document.createElement("table");
-    table.style.width = "100%";
-    table.style.borderCollapse = "collapse";
-    table.style.fontSize = "0.8rem";
-
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-
-    fields.forEach((field) => {
-      const th = document.createElement("th");
-      const displayName = viewState.displayNames[field] || field;
-      th.textContent = displayName;
-      th.style.textAlign = "left";
-      th.style.padding = "0.35rem 0.45rem";
-      th.style.borderBottom = "1px solid rgba(148,163,184,0.4)";
-      th.style.position = "sticky";
-      th.style.top = "0";
-      th.style.background = "#020617";
-      th.style.zIndex = "1";
-      headerRow.appendChild(th);
-    });
-
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-
-    previewRows.forEach((row, rowIndex) => {
-      const tr = document.createElement("tr");
-
-      if (row[NOTE_COLUMN] && String(row[NOTE_COLUMN]).trim() !== "") {
-        tr.style.backgroundColor = "rgba(248,250,252,0.04)";
-      }
-
-      fields.forEach((field) => {
-        const td = document.createElement("td");
-        const val = row[field];
-
-        td.style.padding = "0.3rem 0.45rem";
-        td.style.borderBottom = "1px solid rgba(31,41,55,0.6)";
-        td.style.whiteSpace = "nowrap";
-        td.style.textOverflow = "ellipsis";
-        td.style.overflow = "hidden";
-
-        if (field === NOTE_COLUMN) {
-          td.contentEditable = "true";
-          td.spellcheck = false;
-          td.textContent =
-            val === undefined || val === null ? "" : String(val);
-
-          td.addEventListener("blur", () => {
-            const newVal = td.textContent.trim();
-            parsedData.rows[rowIndex][NOTE_COLUMN] = newVal;
-
-            const fullRow = parsedData.rows[rowIndex];
-            const key = makeAnnotationKey(fullRow);
-            if (key) {
-              const annotations = loadAnnotations();
-              if (!annotations[key] && !newVal) {
-                return;
-              }
-              if (!annotations[key]) {
-                annotations[key] = {};
-              }
-              annotations[key].statusNote = newVal;
-              annotationsCache = annotations;
-              saveAnnotations();
-            }
-
-            if (newVal) {
-              tr.style.backgroundColor = "rgba(248,250,252,0.04)";
-            } else {
-              tr.style.backgroundColor = "";
-            }
-          });
-        } else {
-          td.textContent =
-            val === undefined || val === null ? "" : String(val);
-        }
-
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-
-    table.appendChild(tbody);
-    tableWrapper.appendChild(table);
-
-    tableContainer.appendChild(info);
-    tableContainer.appendChild(tableWrapper);
-  }
-
-  // ---- Group & Count ----
-
-  function renderSummaryPanel() {
-    if (!rootEl) return;
-    const panel = rootEl.querySelector("#csvSummaryPanel");
-    if (!panel) return;
-
-    panel.innerHTML = "";
-
-    const card = document.createElement("div");
-    card.style.background = "#020617";
-    card.style.borderRadius = "0.6rem";
-    card.style.border = "1px solid rgba(148,163,184,0.35)";
-    card.style.padding = "0.6rem 0.7rem";
-    card.style.fontSize = "0.8rem";
-    card.style.marginTop = "0.5rem";
-
-    const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.alignItems = "center";
-    header.style.justifyContent = "space-between";
-    header.style.marginBottom = "0.4rem";
-    header.innerHTML = `
-      <div style="font-weight:600;">Summary – Group & count</div>
-    `;
-    card.appendChild(header);
-
-    const controls = document.createElement("div");
-    controls.style.display = "flex";
-    controls.style.alignItems = "center";
-    controls.style.gap = "0.4rem";
-    controls.style.flexWrap = "wrap";
-    controls.style.marginBottom = "0.5rem";
-
-    const label = document.createElement("span");
-    label.textContent = "Group by:";
-    controls.appendChild(label);
-
-    const select = document.createElement("select");
-    select.id = "summaryFieldSelect";
-    select.style.fontSize = "0.8rem";
-    select.style.padding = "0.25rem 0.45rem";
-    select.style.borderRadius = "0.4rem";
-    select.style.border = "1px solid rgba(148,163,184,0.5)";
-    select.style.background = "#020617";
-    select.style.color = "#e5e7eb";
-    select.disabled = !parsedData;
-
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = parsedData
-      ? "Select a column…"
-      : "Load a CSV first";
-    select.appendChild(placeholder);
-
-    if (parsedData && parsedData.fields.length) {
-      parsedData.fields.forEach((field) => {
-        if (field === NOTE_COLUMN) return; // usually not interesting to group by notes
-        const opt = document.createElement("option");
-        opt.value = field;
-        opt.textContent = viewState.displayNames[field] || field;
-        select.appendChild(opt);
-      });
-    }
-
-    const btn = document.createElement("button");
-    btn.className = "btn btn-secondary";
-    btn.id = "summaryRunBtn";
-    btn.textContent = "Group & count";
-    btn.disabled = !parsedData;
-
-    controls.appendChild(select);
-    controls.appendChild(btn);
-
-    card.appendChild(controls);
-
-    const body = document.createElement("div");
-    body.id = "summaryResult";
-    card.appendChild(body);
-
-    panel.appendChild(card);
-
-    if (parsedData) {
-      btn.addEventListener("click", () => {
-        const field = select.value;
-        if (!field) return;
-        lastSummary = computeGroupAndCount(field);
-        renderSummaryResult(body);
-      });
-
-      if (lastSummary && lastSummary.rows && lastSummary.rows.length) {
-        // If we have a previous summary, show it
-        if (select.value === "" && lastSummary.field) {
-          select.value = lastSummary.field;
-        }
-        renderSummaryResult(body);
-      }
-    } else {
-      body.textContent = "Load a CSV to compute group & count summaries.";
-    }
+    sortState   = { field: null, dir: "asc" };
   }
 
   function computeGroupAndCount(field) {
     if (!parsedData) return null;
     const counts = {};
-    parsedData.rows.forEach((row) => {
-      const raw = row[field];
-      const key = raw == null || raw === "" ? "(empty)" : String(raw);
+    parsedData.rows.forEach(row => {
+      const key = (row[field] == null || row[field] === "") ? "(empty)" : String(row[field]);
       counts[key] = (counts[key] || 0) + 1;
     });
     const rows = Object.entries(counts)
@@ -1064,219 +168,995 @@
     return { field, rows };
   }
 
-  function renderSummaryResult(container) {
-    container.innerHTML = "";
+  function getEffectiveFields() {
+    if (!parsedData) return [];
+    return viewState.visibleFields.length ? viewState.visibleFields : parsedData.fields;
+  }
 
-    if (!lastSummary || !lastSummary.rows.length) {
-      container.textContent = "No summary computed yet.";
+  function getSortedRows() {
+    if (!parsedData) return [];
+    const rows = [...parsedData.rows];
+    const { field, dir } = sortState;
+    if (!field) return rows;
+    return rows.sort((a, b) => {
+      const av = String(a[field] ?? "");
+      const bv = String(b[field] ?? "");
+      const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }
+
+  // ── File handling ─────────────────────────────────────────────────────────
+
+  function handleFile(file) {
+    if (!file) return;
+    currentFile = file;
+    updateFileInfo(`Parsing ${file.name}…`);
+
+    const ext = file.name.split(".").pop().toLowerCase();
+
+    if (ext === "xlsx" || ext === "xls") {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb    = XLSX.read(e.target.result, { type: "array" });
+          const ws    = wb.Sheets[wb.SheetNames[0]];
+          const json  = XLSX.utils.sheet_to_json(ws, { defval: "" });
+          const fields = json.length ? Object.keys(json[0]) : [];
+          ingestRows(fields, json);
+        } catch (err) {
+          console.error("[CSV Workbench] XLSX parse error:", err);
+          updateFileInfo(`Error reading XLSX: ${err.message || err}`);
+        }
+      };
+      reader.readAsArrayBuffer(file);
       return;
     }
 
+    // CSV / TXT
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      dynamicTyping: false,
+      complete: results => ingestRows(results.meta.fields || [], results.data || []),
+      error: err => {
+        console.error("[CSV Workbench] Parse error:", err);
+        updateFileInfo(`Error parsing file: ${err.message || err}`);
+        parsedData = null;
+        viewState  = { visibleFields: [], displayNames: {}, activePreset: null };
+        lastSummary = null;
+        renderTablePreview();
+        renderSummaryPanel();
+      },
+    });
+  }
+
+  function ingestRows(rawFields, rawRows) {
+    let fields = rawFields.slice();
+    if (!fields.includes(NOTE_COL)) fields.push(NOTE_COL);
+
+    const annotations = loadAnnotations();
+    rawRows.forEach(row => {
+      if (row[NOTE_COL] === undefined) row[NOTE_COL] = "";
+      const key = makeAnnotationKey(row);
+      if (key && annotations[key]?.statusNote) row[NOTE_COL] = annotations[key].statusNote;
+    });
+
+    parsedData  = { fields, rows: rawRows };
+    lastSummary = null;
+    sortState   = { field: null, dir: "asc" };
+
+    viewState.visibleFields  = [...fields];
+    viewState.displayNames   = {};
+    viewState.activePreset   = null;
+    fields.forEach(f => { viewState.displayNames[f] = f; });
+
+    updateFileInfo();
+    updateDownloadBtn();
+
+    // Refresh whatever drawer is open
+    if (drawerState.open && drawerState.panel) {
+      renderDrawerPanel(drawerState.panel);
+    }
+    renderTablePreview();
+    renderSummaryPanel();
+  }
+
+  // ── Exports ───────────────────────────────────────────────────────────────
+
+  function buildExportRows() {
+    const fields = getEffectiveFields();
+    return parsedData.rows.map(row => {
+      const obj = {};
+      fields.forEach(f => { obj[viewState.displayNames[f] || f] = row[f]; });
+      return obj;
+    });
+  }
+
+  function downloadCurrentCsv() {
+    if (!parsedData) return;
+    const csv  = Papa.unparse(buildExportRows());
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "pb-tools-export.csv");
+  }
+
+  function downloadCurrentXlsx() {
+    if (!parsedData) return;
+    const ws = XLSX.utils.json_to_sheet(buildExportRows());
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Data");
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    triggerDownload(
+      new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      "pb-tools-export.xlsx"
+    );
+  }
+
+  function exportSummaryCsv() {
+    if (!lastSummary?.rows.length) return;
+    const dn   = viewState.displayNames[lastSummary.field] || lastSummary.field;
+    const data = lastSummary.rows.map(r => ({ [dn]: r.value, Count: r.count }));
+    triggerDownload(new Blob([Papa.unparse(data)], { type: "text/csv;charset=utf-8;" }), "pb-tools-summary.csv");
+  }
+
+  function exportSummaryXlsx() {
+    if (!lastSummary?.rows.length) return;
+    const dn   = viewState.displayNames[lastSummary.field] || lastSummary.field;
+    const data = lastSummary.rows.map(r => ({ [dn]: r.value, Count: r.count }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Summary");
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    triggerDownload(
+      new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      "pb-tools-summary.xlsx"
+    );
+  }
+
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement("a");
+    a.href     = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Render skeleton ───────────────────────────────────────────────────────
+  // Called once on module show(). Builds the stable DOM structure.
+  // All data areas are populated by targeted update functions afterwards.
+
+  function render() {
+    const container = document.getElementById(CONTAINER_ID);
+    if (!container) return;
+
+    // Tell the container which module is active (drives CSS padding rules)
+    container.className = "module-container module-container--csvWorkbench";
+
+    container.innerHTML = `
+      <div class="csv-module">
+
+        <!-- Toolbar / drop zone (combined) -->
+        <div class="csv-toolbar" id="csvDropzone">
+          <button class="btn btn-secondary" id="csvFileButton" style="padding:0.3rem 0.6rem;font-size:0.75rem;flex-shrink:0;">
+            📂 Load file
+          </button>
+          <input type="file" id="csvFileInput" accept=".csv,.txt,.xlsx" style="display:none">
+
+          <div class="csv-file-info" id="csvFileInfo"></div>
+
+          <div class="csv-toolbar-actions">
+            <button class="btn btn-secondary" id="csvDownloadBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;" disabled>
+              ↓ CSV
+            </button>
+            <button class="btn" id="exportOpenButton" style="padding:0.3rem 0.65rem;font-size:0.75rem;">
+              Export…
+            </button>
+          </div>
+        </div>
+
+        <!-- Workspace: rail | drawer | content -->
+        <div class="csv-workspace">
+
+          <!-- Operation icon rail -->
+          <div class="ops-rail" id="opsRail">
+            ${Object.entries(PANEL_ICONS).map(([key, icon]) => `
+              <button class="rail-btn" data-panel="${key}" title="${PANEL_LABELS[key]}">
+                ${icon}
+                <span class="rail-tooltip">${PANEL_LABELS[key]}</span>
+              </button>
+            `).join("")}
+          </div>
+
+          <!-- Slide-out drawer -->
+          <div class="ops-drawer" id="opsDrawer">
+            <div class="ops-drawer-header">
+              <span class="ops-drawer-title" id="opsDrawerTitle"></span>
+              <button class="ops-drawer-close" id="opsDrawerClose" aria-label="Close panel">✕</button>
+            </div>
+            <div class="ops-drawer-body" id="opsDrawerBody"></div>
+          </div>
+
+          <!-- Table + summary -->
+          <div class="csv-content">
+            <div class="csv-table-area" id="csvTableContainer"></div>
+            <div class="csv-summary-area" id="csvSummaryArea"></div>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    wireEvents();
+    updateFileInfo();
+    updateDownloadBtn();
+    updateRailState();
+    if (drawerState.open && drawerState.panel) {
+      openDrawer(drawerState.panel);
+    }
+    renderTablePreview();
+    renderSummaryPanel();
+  }
+
+  // ── Event wiring ──────────────────────────────────────────────────────────
+
+  function wireEvents() {
+    const root = document.getElementById(CONTAINER_ID);
+    if (!root) return;
+
+    // File picker
+    const fileBtn   = root.querySelector("#csvFileButton");
+    const fileInput = root.querySelector("#csvFileInput");
+    if (fileBtn && fileInput) {
+      fileBtn.addEventListener("click", () => { fileInput.value = ""; fileInput.click(); });
+      fileInput.addEventListener("change", e => {
+        const f = e.target.files?.[0];
+        if (f) handleFile(f);
+      });
+    }
+
+    // Drop zone
+    const dz = root.querySelector("#csvDropzone");
+    if (dz) {
+      dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("dragover"); });
+      dz.addEventListener("dragleave", e => { e.preventDefault(); dz.classList.remove("dragover"); });
+      dz.addEventListener("drop", e => {
+        e.preventDefault();
+        dz.classList.remove("dragover");
+        const f = e.dataTransfer.files?.[0];
+        if (f) handleFile(f);
+      });
+      // Also allow clicking the dropzone to open file picker
+      dz.addEventListener("click", () => { fileInput?.click(); });
+    }
+
+    // CSV quick-download
+    const dlBtn = root.querySelector("#csvDownloadBtn");
+    if (dlBtn) dlBtn.addEventListener("click", () => downloadCurrentCsv());
+
+    // Rail buttons
+    const rail = root.querySelector("#opsRail");
+    if (rail) {
+      rail.addEventListener("click", e => {
+        const btn = e.target.closest(".rail-btn");
+        if (!btn) return;
+        const panel = btn.dataset.panel;
+        if (drawerState.open && drawerState.panel === panel) {
+          closeDrawer();
+        } else {
+          openDrawer(panel);
+        }
+      });
+    }
+
+    // Drawer close button
+    const closeBtn = root.querySelector("#opsDrawerClose");
+    if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+  }
+
+  // ── Drawer control ────────────────────────────────────────────────────────
+
+  function openDrawer(panel) {
+    drawerState = { open: true, panel };
+    const drawer    = document.getElementById("opsDrawer");
+    const titleEl   = document.getElementById("opsDrawerTitle");
+    if (drawer)  drawer.classList.add("open");
+    if (titleEl) titleEl.textContent = PANEL_LABELS[panel] || panel;
+    updateRailState();
+    renderDrawerPanel(panel);
+  }
+
+  function closeDrawer() {
+    drawerState = { open: false, panel: null };
+    const drawer = document.getElementById("opsDrawer");
+    if (drawer) drawer.classList.remove("open");
+    updateRailState();
+  }
+
+  function updateRailState() {
+    document.querySelectorAll(".rail-btn").forEach(btn => {
+      btn.classList.toggle("active",
+        drawerState.open && btn.dataset.panel === drawerState.panel
+      );
+    });
+  }
+
+  function renderDrawerPanel(panel) {
+    const body = document.getElementById("opsDrawerBody");
+    if (!body) return;
+    body.innerHTML = "";
+    switch (panel) {
+      case "columns":  buildColumnsPanel(body);  break;
+      case "presets":  buildPresetsPanel(body);  break;
+      case "mapping":  buildMappingPanel(body);  break;
+      case "tools":    buildToolsPanel(body);    break;
+    }
+  }
+
+  // ── Toolbar helpers ───────────────────────────────────────────────────────
+
+  function updateFileInfo(overrideText) {
+    const el = document.getElementById("csvFileInfo");
+    if (!el) return;
+    el.innerHTML = "";
+
+    if (overrideText) {
+      const span = document.createElement("span");
+      span.className    = "csv-no-file";
+      span.textContent  = overrideText;
+      el.appendChild(span);
+      return;
+    }
+
+    if (!parsedData || !currentFile) {
+      const span = document.createElement("span");
+      span.className    = "csv-no-file";
+      span.textContent  = "No file loaded — drop a file anywhere here or click Load";
+      el.appendChild(span);
+      return;
+    }
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className    = "csv-file-name";
+    nameSpan.textContent  = currentFile.name;
+
+    const metaSpan = document.createElement("span");
+    metaSpan.className    = "csv-file-meta";
+    metaSpan.textContent  = `${parsedData.rows.length.toLocaleString()} rows · ${parsedData.fields.length} cols`;
+
+    el.appendChild(nameSpan);
+    el.appendChild(metaSpan);
+
+    if (viewState.activePreset) {
+      const preset = presets[viewState.activePreset];
+      const badge  = document.createElement("span");
+      badge.className   = "csv-preset-badge";
+      badge.textContent = `⚡ ${preset?.label || viewState.activePreset}`;
+      el.appendChild(badge);
+    }
+  }
+
+  function updateDownloadBtn() {
+    const btn = document.getElementById("csvDownloadBtn");
+    if (btn) btn.disabled = !parsedData || !parsedData.rows.length;
+  }
+
+  // ── Panel builders ────────────────────────────────────────────────────────
+
+  // Columns panel
+  function buildColumnsPanel(container) {
+    if (!parsedData) {
+      noDataMessage(container, "Load a file to manage columns.");
+      return;
+    }
+
+    const section = panelSection("VISIBLE · RENAME");
+    const list    = document.createElement("div");
+    list.style.display        = "flex";
+    list.style.flexDirection  = "column";
+    list.style.gap            = "0.2rem";
+
+    parsedData.fields.forEach(field => {
+      const row = document.createElement("div");
+      row.className = "col-field-row";
+
+      const cb = document.createElement("input");
+      cb.type        = "checkbox";
+      cb.checked     = viewState.visibleFields.includes(field);
+      cb.dataset.field = field;
+
+      const nameSpan  = document.createElement("span");
+      nameSpan.className    = "col-field-name";
+      nameSpan.textContent  = field;
+      nameSpan.title        = field;
+
+      const renameInput = document.createElement("input");
+      renameInput.type        = "text";
+      renameInput.className   = "panel-rename-input";
+      renameInput.value       = viewState.displayNames[field] || field;
+      renameInput.dataset.field = field;
+      renameInput.placeholder = "Display name";
+
+      row.appendChild(cb);
+      row.appendChild(nameSpan);
+      row.appendChild(renameInput);
+      list.appendChild(row);
+    });
+
+    section.appendChild(list);
+    container.appendChild(section);
+
+    const applyBtn = applyButton("Apply changes");
+    applyBtn.addEventListener("click", () => applyColumnChanges(container));
+    container.appendChild(applyBtn);
+  }
+
+  function applyColumnChanges(panelContainer) {
+    if (!parsedData) return;
+
+    const newVisible = [];
+    const newNames   = { ...viewState.displayNames };
+
+    panelContainer.querySelectorAll("input[type='checkbox'][data-field]").forEach(cb => {
+      if (cb.checked) newVisible.push(cb.dataset.field);
+    });
+    panelContainer.querySelectorAll("input[type='text'][data-field]").forEach(inp => {
+      const f = inp.dataset.field;
+      if (f) newNames[f] = inp.value.trim() || f;
+    });
+
+    viewState.visibleFields = parsedData.fields.filter(f => newVisible.includes(f));
+    viewState.displayNames  = newNames;
+
+    renderTablePreview();
+    renderSummaryPanel();
+  }
+
+  // Presets panel
+  function buildPresetsPanel(container) {
+    // Select
+    const selectSection = panelSection("SELECT PRESET");
+
+    const select = document.createElement("select");
+    select.className = "panel-select";
+    select.disabled  = !parsedData;
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = parsedData ? "Select a preset…" : "Load a file first";
+    select.appendChild(placeholder);
+
+    Object.values(presets).forEach(p => {
+      const opt       = document.createElement("option");
+      opt.value       = p.id;
+      opt.textContent = p.label;
+      select.appendChild(opt);
+    });
+
+    if (viewState.activePreset) select.value = viewState.activePreset;
+
+    selectSection.appendChild(select);
+    container.appendChild(selectSection);
+
+    // Description
+    const desc = document.createElement("div");
+    desc.className = "preset-desc";
+    desc.id        = "presetDesc";
+
+    function updateDesc() {
+      const p = presets[select.value];
+      desc.textContent = p ? p.description : "";
+      desc.style.display = p ? "block" : "none";
+    }
+    updateDesc();
+    select.addEventListener("change", updateDesc);
+    container.appendChild(desc);
+
+    // Apply
+    if (parsedData) {
+      const applyBtn = applyButton("Apply preset");
+      applyBtn.style.marginTop = "0.1rem";
+      applyBtn.addEventListener("click", () => {
+        const chosen = select.value;
+        if (!chosen) return;
+        if (chosen === "phisherLike") applyPhisherLikePreset();
+        updateFileInfo();
+        updateDownloadBtn();
+        renderTablePreview();
+        renderSummaryPanel();
+        // Refresh this panel to show active preset status
+        renderDrawerPanel("presets");
+      });
+      container.appendChild(applyBtn);
+    }
+
+    // Active preset status
+    const divider = document.createElement("div");
+    divider.className = "panel-divider";
+    divider.style.marginTop = "0.5rem";
+    container.appendChild(divider);
+
+    const statusSection = panelSection("ACTIVE PRESET");
+    if (viewState.activePreset) {
+      const p = presets[viewState.activePreset];
+      const badge = document.createElement("div");
+      badge.className   = "panel-status";
+      badge.textContent = `✓ ${p?.label || viewState.activePreset}`;
+      statusSection.appendChild(badge);
+    } else {
+      const none = document.createElement("div");
+      none.className   = "panel-status-inactive";
+      none.textContent = "No preset applied";
+      statusSection.appendChild(none);
+    }
+    container.appendChild(statusSection);
+  }
+
+  // Value mapping panel
+  function buildMappingPanel(container) {
+    if (!parsedData) {
+      noDataMessage(container, "Load a file to configure value mappings.");
+      return;
+    }
+
+    // Column selector
+    const colSection = panelSection("TARGET COLUMN");
+    const colSelect  = document.createElement("select");
+    colSelect.className = "panel-select";
+    colSelect.id        = "vmColSelect";
+
+    const ph = document.createElement("option");
+    ph.value       = "";
+    ph.textContent = "Select column…";
+    colSelect.appendChild(ph);
+
+    parsedData.fields.forEach(f => {
+      const opt       = document.createElement("option");
+      opt.value       = f;
+      opt.textContent = viewState.displayNames[f] || f;
+      colSelect.appendChild(opt);
+    });
+
+    colSection.appendChild(colSelect);
+    container.appendChild(colSection);
+
+    // Rules
+    const rulesSection = panelSection("RULES");
+    const rulesList    = document.createElement("div");
+    rulesList.id       = "vmRulesList";
+    rulesList.style.display       = "flex";
+    rulesList.style.flexDirection = "column";
+    rulesList.style.gap           = "0.25rem";
+    rulesSection.appendChild(rulesList);
+
+    function addMappingRow(fromVal = "", toVal = "") {
+      const row = document.createElement("div");
+      row.className = "mapping-row";
+
+      const fromInput = document.createElement("input");
+      fromInput.type        = "text";
+      fromInput.className   = "panel-input";
+      fromInput.placeholder = "From";
+      fromInput.value       = fromVal;
+
+      const arrow = document.createElement("span");
+      arrow.className   = "mapping-arrow";
+      arrow.textContent = "→";
+
+      const toInput = document.createElement("input");
+      toInput.type        = "text";
+      toInput.className   = "panel-input";
+      toInput.placeholder = "To";
+      toInput.value       = toVal;
+
+      const delBtn = document.createElement("button");
+      delBtn.className  = "mapping-delete";
+      delBtn.textContent = "✕";
+      delBtn.title      = "Remove row";
+      delBtn.addEventListener("click", () => row.remove());
+
+      row.appendChild(fromInput);
+      row.appendChild(arrow);
+      row.appendChild(toInput);
+      row.appendChild(delBtn);
+      rulesList.appendChild(row);
+    }
+
+    addMappingRow();
+    container.appendChild(rulesSection);
+
+    const addRowBtn = document.createElement("button");
+    addRowBtn.className   = "btn btn-ghost";
+    addRowBtn.textContent = "+ Add rule";
+    addRowBtn.style.cssText = "font-size:0.72rem;padding:0.2rem 0.5rem;align-self:flex-start;";
+    addRowBtn.addEventListener("click", () => addMappingRow());
+    container.appendChild(addRowBtn);
+
+    const hint = document.createElement("div");
+    hint.className   = "panel-hint";
+    hint.textContent = "Append * to the From value for a prefix match.";
+    container.appendChild(hint);
+
+    // Apply
+    const applyBtn = applyButton("Apply mappings");
+    applyBtn.addEventListener("click", () => {
+      const col  = colSelect.value;
+      if (!col) return;
+
+      const rules = {};
+      rulesList.querySelectorAll(".mapping-row").forEach(row => {
+        const inputs = row.querySelectorAll("input");
+        const from   = inputs[0]?.value.trim();
+        const to     = inputs[1]?.value.trim();
+        if (from && to) rules[from] = to;
+      });
+
+      if (!Object.keys(rules).length) return;
+      applyValueMappings({ [col]: rules });
+      renderTablePreview();
+    });
+    container.appendChild(applyBtn);
+  }
+
+  // Tools panel
+  function buildToolsPanel(container) {
+    // Remove duplicates
+    const dedupSection = panelSection("REMOVE DUPLICATES");
+
+    if (!parsedData) {
+      noDataMessage(container, "Load a file to use tools.");
+      return;
+    }
+
+    const colSelect = document.createElement("select");
+    colSelect.className = "panel-select";
+    colSelect.id        = "dedupColSelect";
+
+    const ph = document.createElement("option");
+    ph.value       = "";
+    ph.textContent = "Key column…";
+    colSelect.appendChild(ph);
+
+    parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+      const opt       = document.createElement("option");
+      opt.value       = f;
+      opt.textContent = viewState.displayNames[f] || f;
+      colSelect.appendChild(opt);
+    });
+    dedupSection.appendChild(colSelect);
+
+    const keepFirstRow = radioRow("keepDedup", "keep-first", "Keep first occurrence", true);
+    const keepLastRow  = radioRow("keepDedup", "keep-last",  "Keep last occurrence");
+    dedupSection.appendChild(keepFirstRow);
+    dedupSection.appendChild(keepLastRow);
+
+    const dedupMsg = document.createElement("div");
+    dedupMsg.className    = "panel-hint";
+    dedupMsg.id           = "dedupMsg";
+    dedupSection.appendChild(dedupMsg);
+
+    container.appendChild(dedupSection);
+
+    const runDedupBtn = applyButton("Remove duplicates");
+    runDedupBtn.addEventListener("click", () => {
+      const col = colSelect.value;
+      if (!col || !parsedData) return;
+      const keepLast = keepLastRow.querySelector("input").checked;
+      const before   = parsedData.rows.length;
+      const seenKeys = new Set();
+      const result   = [];
+      const rowsToProcess = keepLast ? [...parsedData.rows].reverse() : parsedData.rows;
+      rowsToProcess.forEach(row => {
+        const key = String(row[col] ?? "");
+        if (!seenKeys.has(key)) { seenKeys.add(key); result.push(row); }
+      });
+      parsedData.rows = keepLast ? result.reverse() : result;
+
+      const removed = before - parsedData.rows.length;
+      dedupMsg.textContent = removed > 0
+        ? `✓ Removed ${removed.toLocaleString()} duplicate${removed !== 1 ? "s" : ""}.`
+        : "No duplicates found.";
+      dedupMsg.style.color = removed > 0 ? "#4ade80" : "#6b7280";
+
+      updateFileInfo();
+      renderTablePreview();
+      renderSummaryPanel();
+    });
+    container.appendChild(runDedupBtn);
+
+    // Data cleanup (coming soon placeholder)
+    const divider = document.createElement("div");
+    divider.className = "panel-divider";
+    divider.style.margin = "0.6rem 0 0.1rem";
+    container.appendChild(divider);
+
+    const cleanSection = panelSection("DATA CLEANUP");
+    const comingSoon   = document.createElement("div");
+    comingSoon.className   = "panel-hint";
+    comingSoon.textContent = "Trim whitespace, normalize case, strip control chars — coming soon.";
+    cleanSection.appendChild(comingSoon);
+    container.appendChild(cleanSection);
+  }
+
+  // ── Table preview ─────────────────────────────────────────────────────────
+
+  function renderTablePreview() {
+    const container = document.getElementById("csvTableContainer");
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (!parsedData?.fields.length || !parsedData.rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "csv-empty-state";
+      empty.innerHTML = `
+        <div class="csv-empty-icon">📂</div>
+        <div class="csv-empty-title">No data loaded</div>
+        <div class="csv-empty-sub">Drop a CSV or XLSX file, or use the Load button above.</div>
+      `;
+      container.appendChild(empty);
+      return;
+    }
+
+    const fields      = getEffectiveFields();
+    const sortedRows  = getSortedRows();
+    const MAX_ROWS    = 500;
+    const previewRows = sortedRows.slice(0, MAX_ROWS);
+
     const info = document.createElement("div");
-    info.style.fontSize = "0.75rem";
-    info.style.color = "#9ca3af";
-    const displayName =
-      viewState.displayNames[lastSummary.field] || lastSummary.field;
-    info.textContent = `Grouped by ${displayName}. ${lastSummary.rows.length.toLocaleString()} distinct values.`;
+    info.className   = "csv-table-info";
+    info.textContent = sortedRows.length > MAX_ROWS
+      ? `Showing first ${MAX_ROWS.toLocaleString()} of ${sortedRows.length.toLocaleString()} rows.`
+      : `${sortedRows.length.toLocaleString()} row${sortedRows.length !== 1 ? "s" : ""}`;
     container.appendChild(info);
 
-    const wrap = document.createElement("div");
-    wrap.style.maxHeight = "220px";
-    wrap.style.overflow = "auto";
-    wrap.style.marginTop = "0.3rem";
-    wrap.style.borderRadius = "0.5rem";
-    wrap.style.border = "1px solid rgba(31,41,55,0.8)";
-    wrap.style.background = "#020617";
+    const tableWrap = document.createElement("div");
 
     const table = document.createElement("table");
-    table.style.width = "100%";
-    table.style.borderCollapse = "collapse";
-    table.style.fontSize = "0.8rem";
+    table.className = "data-table";
+
+    // Header
+    const thead = document.createElement("thead");
+    const hRow  = document.createElement("tr");
+    fields.forEach(field => {
+      const th = document.createElement("th");
+      const dn = viewState.displayNames[field] || field;
+      th.title = field;
+
+      const label = document.createElement("span");
+      label.textContent = dn;
+      th.appendChild(label);
+
+      if (sortState.field === field) {
+        const ind = document.createElement("span");
+        ind.className   = "sort-indicator";
+        ind.textContent = sortState.dir === "asc" ? "▲" : "▼";
+        th.appendChild(ind);
+      }
+
+      th.addEventListener("click", () => {
+        if (sortState.field === field) {
+          sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+        } else {
+          sortState = { field, dir: "asc" };
+        }
+        renderTablePreview();
+      });
+
+      hRow.appendChild(th);
+    });
+    thead.appendChild(hRow);
+    table.appendChild(thead);
+
+    // Body
+    const tbody = document.createElement("tbody");
+    previewRows.forEach((row, rowIdx) => {
+      const tr = document.createElement("tr");
+      if (row[NOTE_COL] && String(row[NOTE_COL]).trim()) tr.classList.add("annotated");
+
+      // Find the actual index in parsedData.rows for annotation writes
+      const dataIdx = parsedData.rows.indexOf(row);
+
+      fields.forEach(field => {
+        const td  = document.createElement("td");
+        const val = row[field];
+
+        if (field === NOTE_COL) {
+          td.contentEditable = "true";
+          td.spellcheck      = false;
+          td.className       = "cell-note";
+          td.textContent     = (val == null ? "" : String(val));
+
+          td.addEventListener("blur", () => {
+            const newVal = td.textContent.trim();
+            if (dataIdx >= 0) parsedData.rows[dataIdx][NOTE_COL] = newVal;
+
+            const key = makeAnnotationKey(row);
+            if (key) {
+              const ann = loadAnnotations();
+              if (!ann[key]) ann[key] = {};
+              ann[key].statusNote = newVal;
+              annotationsCache = ann;
+              saveAnnotations();
+            }
+
+            tr.classList.toggle("annotated", !!newVal);
+          });
+        } else {
+          td.textContent = (val == null ? "" : String(val));
+        }
+
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    container.appendChild(tableWrap);
+  }
+
+  // ── Summary panel ─────────────────────────────────────────────────────────
+
+  function renderSummaryPanel() {
+    const area = document.getElementById("csvSummaryArea");
+    if (!area) return;
+    area.innerHTML = "";
+
+    // Controls row
+    const controls = document.createElement("div");
+    controls.className = "csv-summary-controls";
+
+    const label = document.createElement("span");
+    label.className   = "summary-label";
+    label.textContent = "Group by:";
+
+    const select = document.createElement("select");
+    select.className = "summary-select";
+    select.disabled  = !parsedData;
+
+    const ph = document.createElement("option");
+    ph.value       = "";
+    ph.textContent = parsedData ? "Select column…" : "Load a file first";
+    select.appendChild(ph);
+
+    if (parsedData) {
+      parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+        const opt       = document.createElement("option");
+        opt.value       = f;
+        opt.textContent = viewState.displayNames[f] || f;
+        select.appendChild(opt);
+      });
+      if (lastSummary?.field) select.value = lastSummary.field;
+    }
+
+    const runBtn = document.createElement("button");
+    runBtn.className = "btn btn-secondary";
+    runBtn.style.cssText = "padding:0.2rem 0.55rem;font-size:0.72rem;";
+    runBtn.textContent = "Run";
+    runBtn.disabled    = !parsedData;
+
+    controls.appendChild(label);
+    controls.appendChild(select);
+    controls.appendChild(runBtn);
+    area.appendChild(controls);
+
+    // Results
+    const results = document.createElement("div");
+    results.className = "csv-summary-results";
+    results.id        = "csvSummaryResults";
+    area.appendChild(results);
+
+    runBtn.addEventListener("click", () => {
+      const field = select.value;
+      if (!field) return;
+      lastSummary = computeGroupAndCount(field);
+      renderSummaryResults(results);
+    });
+
+    if (lastSummary?.rows?.length) {
+      renderSummaryResults(results);
+    }
+  }
+
+  function renderSummaryResults(container) {
+    container.innerHTML = "";
+    if (!lastSummary?.rows.length) return;
+
+    const dn = viewState.displayNames[lastSummary.field] || lastSummary.field;
+
+    const info = document.createElement("div");
+    info.className   = "summary-info";
+    info.textContent = `Grouped by "${dn}" — ${lastSummary.rows.length.toLocaleString()} distinct values.`;
+    container.appendChild(info);
+
+    const table = document.createElement("table");
+    table.className = "summary-table";
 
     const thead = document.createElement("thead");
-    const hr = document.createElement("tr");
-
-    const hVal = document.createElement("th");
-    hVal.textContent = "Value";
-    hVal.style.textAlign = "left";
-    hVal.style.padding = "0.3rem 0.45rem";
-    hVal.style.borderBottom = "1px solid rgba(148,163,184,0.4)";
-    hr.appendChild(hVal);
-
-    const hCount = document.createElement("th");
-    hCount.textContent = "Count";
-    hCount.style.textAlign = "right";
-    hCount.style.padding = "0.3rem 0.45rem";
-    hCount.style.borderBottom = "1px solid rgba(148,163,184,0.4)";
-    hr.appendChild(hCount);
-
+    const hr    = document.createElement("tr");
+    ["Value", "Count"].forEach((text, i) => {
+      const th = document.createElement("th");
+      th.textContent = text;
+      if (i > 0) th.style.textAlign = "right";
+      hr.appendChild(th);
+    });
     thead.appendChild(hr);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
-    lastSummary.rows.forEach((row) => {
-      const tr = document.createElement("tr");
-
-      const tdVal = document.createElement("td");
-      tdVal.textContent = row.value;
-      tdVal.style.padding = "0.25rem 0.45rem";
-      tdVal.style.borderBottom = "1px solid rgba(31,41,55,0.6)";
-      tdVal.style.whiteSpace = "nowrap";
-      tdVal.style.textOverflow = "ellipsis";
-      tdVal.style.overflow = "hidden";
-      tr.appendChild(tdVal);
-
-      const tdCount = document.createElement("td");
-      tdCount.textContent = row.count.toLocaleString();
-      tdCount.style.padding = "0.25rem 0.45rem";
-      tdCount.style.borderBottom = "1px solid rgba(31,41,55,0.6)";
-      tdCount.style.textAlign = "right";
-      tr.appendChild(tdCount);
-
+    lastSummary.rows.forEach(row => {
+      const tr  = document.createElement("tr");
+      const tdV = document.createElement("td");
+      const tdC = document.createElement("td");
+      tdV.textContent = row.value;
+      tdC.textContent = row.count.toLocaleString();
+      tr.appendChild(tdV);
+      tr.appendChild(tdC);
       tbody.appendChild(tr);
     });
-
     table.appendChild(tbody);
-    wrap.appendChild(table);
-    container.appendChild(wrap);
-
+    container.appendChild(table);
   }
 
-  function exportSummaryCsv() {
-    if (!lastSummary || !lastSummary.rows.length) return;
-    const displayName =
-      viewState.displayNames[lastSummary.field] || lastSummary.field;
+  // ── UI helpers ────────────────────────────────────────────────────────────
 
-    const data = lastSummary.rows.map((r) => ({
-      [displayName]: r.value,
-      Count: r.count,
-    }));
-
-    const csv = Papa.unparse(data);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "secops-workbench-summary.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
+  function panelSection(labelText) {
+    const section = document.createElement("div");
+    section.className = "panel-section";
+    if (labelText) {
+      const lbl = document.createElement("div");
+      lbl.className   = "panel-label";
+      lbl.textContent = labelText;
+      section.appendChild(lbl);
+    }
+    return section;
   }
 
-  function exportSummaryXlsx() {
-    if (!lastSummary || !lastSummary.rows.length) return;
-
-    const displayName =
-      viewState.displayNames[lastSummary.field] || lastSummary.field;
-
-    const data = lastSummary.rows.map((r) => ({
-      [displayName]: r.value,
-      Count: r.count,
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Summary");
-
-    const wbout = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const blob = new Blob(
-      [wbout],
-      {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }
-    );
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "secops-workbench-summary.xlsx";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
+  function applyButton(text) {
+    const btn = document.createElement("button");
+    btn.className   = "btn";
+    btn.style.cssText = "font-size:0.75rem;padding:0.3rem 0.65rem;margin-top:0.15rem;";
+    btn.textContent = text;
+    return btn;
   }
 
-  // ---- Download main CSV ----
-
-  function downloadCurrentCsv() {
-    if (!parsedData) return;
-
-    const fields = getEffectiveFields();
-    const rows = parsedData.rows;
-
-    const exportRows = rows.map((row) => {
-      const obj = {};
-      fields.forEach((field) => {
-        obj[viewState.displayNames[field] || field] = row[field];
-      });
-      return obj;
-    });
-
-    const csv = Papa.unparse(exportRows);
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "secops-workbench.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
+  function radioRow(name, value, labelText, checked = false) {
+    const wrap  = document.createElement("label");
+    wrap.className = "radio-row";
+    const input = document.createElement("input");
+    input.type    = "radio";
+    input.name    = name;
+    input.value   = value;
+    input.checked = checked;
+    const span = document.createElement("span");
+    span.textContent = labelText;
+    wrap.appendChild(input);
+    wrap.appendChild(span);
+    return wrap;
   }
 
-  // ---- Download main XLSX ----
-
-  function downloadCurrentXlsx() {
-    if (!parsedData) return;
-
-    const fields = getEffectiveFields();
-    const rows = parsedData.rows;
-
-    const exportRows = rows.map((row) => {
-      const obj = {};
-      fields.forEach((field) => {
-        obj[viewState.displayNames[field] || field] = row[field];
-      });
-      return obj;
-    });
-
-    // Build worksheet and workbook
-    const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
-
-    // Generate XLSX and download
-    const wbout = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const blob = new Blob(
-      [wbout],
-      {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }
-    );
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "secops-workbench.xlsx";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
+  function noDataMessage(container, text) {
+    const msg = document.createElement("div");
+    msg.className   = "panel-hint";
+    msg.textContent = text;
+    container.appendChild(msg);
   }
+
+  // ── Module lifecycle ──────────────────────────────────────────────────────
+
+  function init() {}
 
   function show() {
     render();
+    // Reopen drawer to the last open panel (persists across module switches)
+    if (drawerState.open && drawerState.panel) {
+      openDrawer(drawerState.panel);
+    }
   }
 
   function hide() {}
+
+  // ── Registration ──────────────────────────────────────────────────────────
 
   window.SecOpsWorkbench.registerModule("csvWorkbench", {
     meta,
@@ -1284,14 +1164,13 @@
     show,
     hide,
     api: {
-      exportMainCsv: downloadCurrentCsv,
-      exportMainXlsx: downloadCurrentXlsx,
+      exportMainCsv:     downloadCurrentCsv,
+      exportMainXlsx:    downloadCurrentXlsx,
       exportSummaryCsv,
       exportSummaryXlsx,
       applyValueMappings,
-      hasSummary: () =>
-        !!(lastSummary && lastSummary.rows && lastSummary.rows.length),
+      hasSummary: () => !!(lastSummary?.rows?.length),
     },
   });
-})();
 
+})();

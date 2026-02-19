@@ -8,7 +8,6 @@
   >
   <title>PB Tools</title>
 
-  <!-- Security-related meta -->
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta
     http-equiv="Content-Security-Policy"
@@ -30,32 +29,34 @@
 </head>
 <body>
   <div id="app">
-    <!-- Sidebar -->
+
+    <!-- App sidebar — module navigation -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <div class="logo-circle">S</div>
+        <div class="logo-circle">P</div>
         <div class="sidebar-title">
-          <div class="app-name">Pb Tools</div>
+          <div class="app-name">PB Tools</div>
           <div class="app-subtitle">Internal tools</div>
         </div>
+        <button
+          class="sidebar-toggle"
+          id="sidebarToggleButton"
+          aria-label="Toggle sidebar"
+        >‹</button>
       </div>
 
       <nav class="sidebar-nav">
-        <button
-          class="nav-item active"
-          data-module="csvWorkbench"
-        >
+        <button class="nav-item active" data-module="csvWorkbench">
           <span class="nav-icon">📊</span>
           <span class="nav-label">CSV Workbench</span>
         </button>
 
-        <!-- Future modules -->
-        <button
-          class="nav-item"
-          data-module="placeholder"
-          disabled
-          title="Future module"
-        >
+        <button class="nav-item" data-module="settings">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">Settings</span>
+        </button>
+
+        <button class="nav-item" data-module="placeholder" disabled title="Coming soon">
           <span class="nav-icon">🧩</span>
           <span class="nav-label">Coming soon</span>
         </button>
@@ -63,32 +64,30 @@
 
       <div class="sidebar-footer">
         <span class="env-badge">Local only</span>
-        <span class="version-badge">v0.1.0</span>
+        <span class="version-badge">v0.2.0</span>
       </div>
     </aside>
 
     <!-- Main content -->
     <main class="main">
       <header class="main-header">
-        <div>
+        <div class="main-header-text">
           <h1 id="moduleTitle">CSV / Spreadsheet Workbench</h1>
           <p id="moduleSubtitle" class="main-subtitle">
-            Load, clean, and export campaign and PB Tools CSV data. All processing happens locally.
+            Load, clean, and export CSV data. All processing happens locally.
           </p>
         </div>
         <div class="main-actions">
-          <button class="btn btn-secondary" id="exportOpenButton">
-            Export
-          </button>
           <span class="status-dot status-ok"></span>
           <span class="status-label">Ready</span>
         </div>
       </header>
 
       <section id="moduleContainer" class="module-container">
-        <!-- The CSV Workbench module will render its UI here -->
+        <!-- Active module renders here -->
       </section>
     </main>
+
   </div>
 
   <!-- Export modal -->
@@ -97,17 +96,9 @@
       <div class="modal-header">
         <div>
           <div class="modal-title">Export data</div>
-          <div class="modal-subtitle">
-            Choose what to export and in which format.
-          </div>
+          <div class="modal-subtitle">Choose what to export and in which format.</div>
         </div>
-        <button
-          class="modal-close"
-          id="exportModalCloseBtn"
-          aria-label="Close export dialog"
-        >
-          ×
-        </button>
+        <button class="modal-close" id="exportModalCloseBtn" aria-label="Close">×</button>
       </div>
 
       <div class="modal-body">
@@ -117,20 +108,14 @@
             <input type="radio" name="exportFormat" value="csv" checked>
             <div class="export-format-content">
               <div class="export-format-title">CSV</div>
-              <div class="export-format-subtitle">
-                Download as CSV for Excel or other tools.
-              </div>
+              <div class="export-format-subtitle">Download as CSV for Excel or other tools.</div>
             </div>
           </label>
-
-          <!-- Placeholder for future formats -->
           <label class="export-format-card">
             <input type="radio" name="exportFormat" value="xlsx">
             <div class="export-format-content">
               <div class="export-format-title">XLSX</div>
-              <div class="export-format-subtitle">
-                Excel workbook.
-              </div>
+              <div class="export-format-subtitle">Excel workbook.</div>
             </div>
           </label>
         </div>
@@ -141,31 +126,22 @@
             <input type="radio" name="exportDataset" value="main" checked>
             <div class="export-format-content">
               <div class="export-format-title">Main data</div>
-              <div class="export-format-subtitle">
-                Current table with visible columns and annotations.
-              </div>
+              <div class="export-format-subtitle">Current table with visible columns and annotations.</div>
             </div>
           </label>
-
           <label class="export-dataset-card" id="exportSummaryOption">
             <input type="radio" name="exportDataset" value="summary">
             <div class="export-format-content">
               <div class="export-format-title">Summary</div>
-              <div class="export-format-subtitle">
-                Latest group &amp; count results (if available).
-              </div>
+              <div class="export-format-subtitle">Latest group &amp; count results (if available).</div>
             </div>
           </label>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="exportCancelButton">
-          Cancel
-        </button>
-        <button class="btn" id="exportConfirmButton">
-          Export
-        </button>
+        <button class="btn btn-secondary" id="exportCancelButton">Cancel</button>
+        <button class="btn" id="exportConfirmButton">Export</button>
       </div>
     </div>
   </div>
@@ -177,5 +153,6 @@
   <!-- Core app + modules -->
   <script src="app.js"></script>
   <script src="modules/csvWorkbench.js"></script>
+  <script src="modules/settings.js"></script>
 </body>
 </html>

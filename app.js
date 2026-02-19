@@ -16,66 +16,81 @@ function activateModule(name) {
   if (!module) return;
 
   // Hide previous
-  if (SecOpsWorkbench.currentModule && SecOpsWorkbench.currentModule.hide) {
+  if (SecOpsWorkbench.currentModule?.hide) {
     SecOpsWorkbench.currentModule.hide();
   }
 
-  // Update header
-  const titleEl = document.getElementById("moduleTitle");
+  // Update header title / subtitle
+  const titleEl    = document.getElementById("moduleTitle");
   const subtitleEl = document.getElementById("moduleSubtitle");
-
   if (module.meta) {
-    if (titleEl && module.meta.title) titleEl.textContent = module.meta.title;
-    if (subtitleEl && module.meta.subtitle) {
-      subtitleEl.textContent = module.meta.subtitle;
-    }
+    if (titleEl    && module.meta.title)    titleEl.textContent    = module.meta.title;
+    if (subtitleEl && module.meta.subtitle) subtitleEl.textContent = module.meta.subtitle;
   }
 
-  // Show new
-  if (module.show) {
-    module.show();
+  // Set module-specific class on the container (drives CSS layout rules)
+  const container = document.getElementById("moduleContainer");
+  if (container) {
+    container.className = `module-container module-container--${name}`;
   }
+
+  // Show new module
+  if (module.show) module.show();
 
   SecOpsWorkbench.currentModule = module;
 
   // Update nav active state
-  const navButtons = document.querySelectorAll(".nav-item[data-module]");
-  navButtons.forEach((btn) => {
-    const mod = btn.getAttribute("data-module");
-    btn.classList.toggle("active", mod === name);
+  document.querySelectorAll(".nav-item[data-module]").forEach(btn => {
+    btn.classList.toggle("active", btn.getAttribute("data-module") === name);
   });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Wire navigation
-  document.querySelectorAll(".nav-item[data-module]").forEach((btn) => {
+  const appRoot            = document.getElementById("app");
+  const sidebarToggleBtn   = document.getElementById("sidebarToggleButton");
+  const exportModalBackdrop = document.getElementById("exportModalBackdrop");
+  const exportModalCloseBtn = document.getElementById("exportModalCloseBtn");
+  const exportCancelButton  = document.getElementById("exportCancelButton");
+  const exportConfirmButton = document.getElementById("exportConfirmButton");
+
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  if (appRoot) {
+    const saved = localStorage.getItem("pbTools_theme");
+    appRoot.classList.add(saved || "theme-dark");
+  }
+
+  // ── Sidebar collapse/expand ────────────────────────────────────────────────
+  if (appRoot && sidebarToggleBtn) {
+    const collapsed = localStorage.getItem("pbTools_sidebarCollapsed") === "1";
+    if (collapsed) appRoot.classList.add("sidebar-collapsed");
+    sidebarToggleBtn.textContent = collapsed ? "☰" : "‹";
+
+    sidebarToggleBtn.addEventListener("click", () => {
+      appRoot.classList.toggle("sidebar-collapsed");
+      const isNowCollapsed = appRoot.classList.contains("sidebar-collapsed");
+      localStorage.setItem("pbTools_sidebarCollapsed", isNowCollapsed ? "1" : "0");
+      sidebarToggleBtn.textContent = isNowCollapsed ? "☰" : "‹";
+    });
+  }
+
+  // ── Navigation ─────────────────────────────────────────────────────────────
+  document.querySelectorAll(".nav-item[data-module]").forEach(btn => {
     btn.addEventListener("click", () => {
-      const modName = btn.getAttribute("data-module");
-      if (!btn.disabled) {
-        activateModule(modName);
-      }
+      if (!btn.disabled) activateModule(btn.getAttribute("data-module"));
     });
   });
 
-  // Initialize all registered modules
-  Object.entries(SecOpsWorkbench.modules).forEach(([name, module]) => {
-    if (module.init) module.init();
+  // ── Initialize all modules ─────────────────────────────────────────────────
+  Object.entries(SecOpsWorkbench.modules).forEach(([, mod]) => {
+    if (mod.init) mod.init();
   });
-  // Export modal wiring
-  const exportOpenButton = document.getElementById("exportOpenButton");
-  const exportModalBackdrop = document.getElementById("exportModalBackdrop");
-  const exportModalCloseBtn = document.getElementById("exportModalCloseBtn");
-  const exportCancelButton = document.getElementById("exportCancelButton");
-  const exportConfirmButton = document.getElementById("exportConfirmButton");
 
+  // ── Export modal helpers ───────────────────────────────────────────────────
   function openExportModal(hasSummary) {
     if (!exportModalBackdrop) return;
 
-    // Enable/disable summary option based on availability
     const summaryOption = document.getElementById("exportSummaryOption");
-    const summaryRadio = summaryOption
-      ? summaryOption.querySelector('input[type="radio"]')
-      : null;
+    const summaryRadio  = summaryOption?.querySelector('input[type="radio"]');
 
     if (summaryOption && summaryRadio) {
       if (hasSummary) {
@@ -84,10 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         summaryOption.classList.add("disabled");
         summaryRadio.disabled = true;
-        // Ensure main is selected
-        const mainRadio = document.querySelector(
-          'input[name="exportDataset"][value="main"]'
-        );
+        const mainRadio = document.querySelector('input[name="exportDataset"][value="main"]');
         if (mainRadio) mainRadio.checked = true;
       }
     }
@@ -96,62 +108,43 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function closeExportModal() {
-    if (!exportModalBackdrop) return;
-    exportModalBackdrop.classList.add("hidden");
+    exportModalBackdrop?.classList.add("hidden");
   }
 
-  if (exportOpenButton) {
-    exportOpenButton.addEventListener("click", () => {
-      const csvModule = SecOpsWorkbench.modules["csvWorkbench"];
-      const hasSummary =
-        csvModule && csvModule.api && csvModule.api.hasSummary
-          ? csvModule.api.hasSummary()
-          : false;
-      openExportModal(hasSummary);
-    });
-  }
-
-  [exportModalCloseBtn, exportCancelButton].forEach((btn) => {
-    if (btn) {
-      btn.addEventListener("click", () => {
-        closeExportModal();
-      });
+  // ── Export button — event delegation (button is inside dynamic module DOM) ─
+  document.addEventListener("click", e => {
+    if (e.target.closest("#exportOpenButton")) {
+      const csvMod = SecOpsWorkbench.modules["csvWorkbench"];
+      openExportModal(csvMod?.api?.hasSummary?.() ?? false);
     }
   });
 
-  if (exportConfirmButton) {
-    exportConfirmButton.addEventListener("click", () => {
-      const format = document.querySelector(
-        'input[name="exportFormat"]:checked'
-      )?.value;
-      const dataset = document.querySelector(
-        'input[name="exportDataset"]:checked'
-      )?.value;
+  // ── Modal close buttons ────────────────────────────────────────────────────
+  [exportModalCloseBtn, exportCancelButton].forEach(btn => {
+    btn?.addEventListener("click", closeExportModal);
+  });
 
-      const csvModule = SecOpsWorkbench.modules["csvWorkbench"];
-      if (!csvModule || !csvModule.api) {
-        closeExportModal();
-        return;
-      }
+  // ── Export confirm ─────────────────────────────────────────────────────────
+  exportConfirmButton?.addEventListener("click", () => {
+    const format  = document.querySelector('input[name="exportFormat"]:checked')?.value;
+    const dataset = document.querySelector('input[name="exportDataset"]:checked')?.value;
+    const api     = SecOpsWorkbench.modules["csvWorkbench"]?.api;
 
-      if (format === "csv" && dataset === "main") {
-        csvModule.api.exportMainCsv();
-      } else if (format === "csv" && dataset === "summary") {
-        csvModule.api.exportSummaryCsv();
-      } else if (format === "xlsx" && dataset === "main") {
-        csvModule.api.exportMainXlsx();
-      } else if (format === "xlsx" && dataset === "summary") {
-        csvModule.api.exportSummaryXlsx();
-      }
-      closeExportModal();
-    });
-  }
+    if (api) {
+      if      (format === "csv"  && dataset === "main")    api.exportMainCsv();
+      else if (format === "csv"  && dataset === "summary") api.exportSummaryCsv();
+      else if (format === "xlsx" && dataset === "main")    api.exportMainXlsx();
+      else if (format === "xlsx" && dataset === "summary") api.exportSummaryXlsx();
+    }
 
-  // Default module
+    closeExportModal();
+  });
+
+  // ── Default module ─────────────────────────────────────────────────────────
   activateModule("csvWorkbench");
 });
 
-// Expose register function globally for modules
+// Expose globally for modules
 window.SecOpsWorkbench = {
   registerModule,
   modules: SecOpsWorkbench.modules,
