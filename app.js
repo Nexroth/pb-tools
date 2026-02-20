@@ -135,6 +135,8 @@ document.addEventListener("DOMContentLoaded", () => {
       else if (format === "csv"  && dataset === "summary") api.exportSummaryCsv();
       else if (format === "xlsx" && dataset === "main")    api.exportMainXlsx();
       else if (format === "xlsx" && dataset === "summary") api.exportSummaryXlsx();
+      else if (format === "html" && dataset === "main")    api.exportMainHtml();
+      else if (format === "html" && dataset === "summary") api.exportSummaryHtml();
     }
 
     closeExportModal();

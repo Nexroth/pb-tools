@@ -409,6 +409,86 @@
     );
   }
 
+  function downloadCurrentHtml() {
+    if (!parsedData) return;
+    const fields   = getEffectiveFields();
+    const rows     = parsedData.rows;
+    const headers  = fields.map(f => viewState.displayNames[f] || f);
+    const filename = parsedData.filename ? parsedData.filename.replace(/\.[^.]+$/, "") : "pb-tools-export";
+
+    const thead = `<thead><tr>${headers.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr></thead>`;
+    const tbody = `<tbody>${rows.map(row =>
+      `<tr>${fields.map(f => `<td>${escHtml(String(row[f] ?? ""))}</td>`).join("")}</tr>`
+    ).join("")}</tbody>`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(filename)}</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,sans-serif;font-size:13px;color:#111;margin:0;padding:1.5rem 2rem;background:#fff}
+  h1{font-size:1.1rem;margin:0 0 0.25rem;color:#111}
+  .meta{font-size:0.75rem;color:#6b7280;margin-bottom:1rem}
+  table{border-collapse:collapse;width:100%;font-size:12px}
+  th{background:#f3f4f6;color:#374151;font-weight:600;text-align:left;padding:0.4rem 0.6rem;border:1px solid #e5e7eb;white-space:nowrap}
+  td{padding:0.35rem 0.6rem;border:1px solid #e5e7eb;vertical-align:top}
+  tr:nth-child(even) td{background:#f9fafb}
+  @media print{body{padding:0.5rem}th{background:#e5e7eb!important;-webkit-print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<h1>${escHtml(filename)}</h1>
+<div class="meta">Exported ${new Date().toLocaleString()} &mdash; ${rows.length.toLocaleString()} rows &mdash; ${headers.length} columns</div>
+<table>${thead}${tbody}</table>
+</body>
+</html>`;
+
+    triggerDownload(new Blob([html], { type: "text/html;charset=utf-8;" }), `${filename}.html`);
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function exportSummaryHtml() {
+    if (!lastSummary?.rows.length) return;
+    const dn  = viewState.displayNames[lastSummary.field] || lastSummary.field;
+    const rows = lastSummary.rows;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Summary — ${escHtml(dn)}</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,sans-serif;font-size:13px;color:#111;margin:0;padding:1.5rem 2rem;background:#fff}
+  h1{font-size:1.1rem;margin:0 0 0.25rem}
+  .meta{font-size:0.75rem;color:#6b7280;margin-bottom:1rem}
+  table{border-collapse:collapse;width:auto;min-width:280px;font-size:12px}
+  th{background:#f3f4f6;color:#374151;font-weight:600;text-align:left;padding:0.4rem 0.6rem;border:1px solid #e5e7eb}
+  td{padding:0.35rem 0.6rem;border:1px solid #e5e7eb}
+  td:last-child{text-align:right}
+  tr:nth-child(even) td{background:#f9fafb}
+  @media print{th{background:#e5e7eb!important;-webkit-print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<h1>Summary — ${escHtml(dn)}</h1>
+<div class="meta">Exported ${new Date().toLocaleString()} &mdash; ${rows.length.toLocaleString()} distinct values</div>
+<table>
+<thead><tr><th>${escHtml(dn)}</th><th>Count</th></tr></thead>
+<tbody>${rows.map(r => `<tr><td>${escHtml(String(r.value))}</td><td>${r.count.toLocaleString()}</td></tr>`).join("")}</tbody>
+</table>
+</body>
+</html>`;
+
+    triggerDownload(new Blob([html], { type: "text/html;charset=utf-8;" }), "pb-tools-summary.html");
+  }
+
   function exportSummaryCsv() {
     if (!lastSummary?.rows.length) return;
     const dn   = viewState.displayNames[lastSummary.field] || lastSummary.field;
@@ -2180,10 +2260,21 @@
     api: {
       exportMainCsv:     downloadCurrentCsv,
       exportMainXlsx:    downloadCurrentXlsx,
+      exportMainHtml:    downloadCurrentHtml,
       exportSummaryCsv,
       exportSummaryXlsx,
+      exportSummaryHtml,
       applyValueMappings,
       hasSummary: () => !!(lastSummary?.rows?.length),
+      // Used by Report Builder to read the active session
+      getData: () => parsedData ? {
+        fields:       parsedData.fields,
+        rows:         parsedData.rows,
+        visibleFields: viewState.visibleFields,
+        displayNames: viewState.displayNames,
+        filename:     parsedData.filename || "export",
+      } : null,
+      computeGroupAndCount,
     },
   });
 

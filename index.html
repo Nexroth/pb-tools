@@ -51,6 +51,11 @@
           <span class="nav-label">CSV Workbench</span>
         </button>
 
+        <button class="nav-item" data-module="reportBuilder">
+          <span class="nav-icon">📈</span>
+          <span class="nav-label">Report Builder</span>
+        </button>
+
         <button class="nav-item" data-module="settings">
           <span class="nav-icon">⚙️</span>
           <span class="nav-label">Settings</span>
@@ -118,6 +123,13 @@
               <div class="export-format-subtitle">Excel workbook.</div>
             </div>
           </label>
+          <label class="export-format-card">
+            <input type="radio" name="exportFormat" value="html">
+            <div class="export-format-content">
+              <div class="export-format-title">HTML</div>
+              <div class="export-format-subtitle">Styled table, opens in browser, print to PDF.</div>
+            </div>
+          </label>
         </div>
 
         <div class="modal-section-title" style="margin-top:0.75rem;">Dataset</div>
@@ -149,10 +161,12 @@
   <!-- Libraries (local) -->
   <script src="lib/papaparse.min.js"></script>
   <script src="lib/xlsx.full.min.js"></script>
+  <script src="lib/chart.umd.js"></script>
 
   <!-- Core app + modules -->
   <script src="app.js"></script>
   <script src="modules/csvWorkbench.js"></script>
+  <script src="modules/reportBuilder.js"></script>
   <script src="modules/settings.js"></script>
 </body>
 </html>
