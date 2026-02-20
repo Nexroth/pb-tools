@@ -1162,29 +1162,13 @@
 
         const renameBtn = document.createElement("button");
         renameBtn.className   = "btn btn-ghost";
-        renameBtn.textContent = "✏ Rename";
+        renameBtn.textContent = "✏ Edit";
         renameBtn.addEventListener("click", () => {
-          const currentName = p.label;
-          const input = document.createElement("input");
-          input.type      = "text";
-          input.className = "panel-input";
-          input.value     = currentName;
-
-          nameEl.replaceWith(input);
-          input.focus();
-          input.select();
-
-          function commitRename() {
-            const newName = input.value.trim() || currentName;
-            const map = loadUserPresets();
-            if (map[p.id]) { map[p.id].label = newName; saveUserPresets(map); }
-            renderDrawerPanel("presets");
-          }
-          input.addEventListener("blur", commitRename);
-          input.addEventListener("keydown", e => {
-            if (e.key === "Enter")  { e.preventDefault(); commitRename(); }
-            if (e.key === "Escape") { e.preventDefault(); renderDrawerPanel("presets"); }
-          });
+          // Toggle inline edit panel
+          const existing = row.querySelector(".preset-edit-panel");
+          if (existing) { existing.remove(); renameBtn.textContent = "✏ Edit"; return; }
+          renameBtn.textContent = "▲ Close";
+          buildPresetEditPanel(p, row);
         });
         actions.appendChild(renameBtn);
 
@@ -1501,6 +1485,207 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function buildPresetEditPanel(preset, parentRow) {
+    const OP_OPTIONS = [
+      { value: "eq",       label: "equals" },
+      { value: "neq",      label: "not equals" },
+      { value: "contains", label: "contains" },
+      { value: "empty",    label: "is empty" },
+      { value: "notempty", label: "is not empty" },
+    ];
+
+    const panel = document.createElement("div");
+    panel.className = "preset-edit-panel";
+
+    // ── Name ────────────────────────────────────────────────────────────────
+    const nameLabel = document.createElement("div");
+    nameLabel.className   = "panel-label";
+    nameLabel.textContent = "NAME";
+    panel.appendChild(nameLabel);
+
+    const nameInput = document.createElement("input");
+    nameInput.type        = "text";
+    nameInput.className   = "panel-input";
+    nameInput.value       = preset.label;
+    panel.appendChild(nameInput);
+
+    // ── Columns / renames / mappings ─────────────────────────────────────────
+    const sessionLabel = document.createElement("div");
+    sessionLabel.className   = "panel-label";
+    sessionLabel.style.marginTop = "0.5rem";
+    sessionLabel.textContent = "COLUMNS · RENAMES · VALUE MAPPINGS";
+    panel.appendChild(sessionLabel);
+
+    const sessionInfo = document.createElement("div");
+    sessionInfo.className = "panel-hint";
+    panel.appendChild(sessionInfo);
+
+    function refreshSessionInfo() {
+      const fields = preset.keepFields || [];
+      const renames = preset.renameFields || {};
+      const renamed = Object.entries(renames).filter(([k, v]) => k !== v).map(([k, v]) => `${k}→${v}`);
+      const mappingCols = Object.keys(preset.valueMapping || {});
+      let lines = [`${fields.length} column(s): ${fields.join(", ")}`];
+      if (renamed.length) lines.push(`Renames: ${renamed.join(", ")}`);
+      if (mappingCols.length) lines.push(`Value mappings on: ${mappingCols.join(", ")}`);
+      sessionInfo.textContent = lines.join(" · ");
+    }
+    refreshSessionInfo();
+
+    const updateFromSessionBtn = document.createElement("button");
+    updateFromSessionBtn.className   = "btn btn-ghost";
+    updateFromSessionBtn.style.cssText = "font-size:0.72rem;padding:0.2rem 0.5rem;margin-top:0.2rem;";
+    updateFromSessionBtn.textContent = parsedData ? "↻ Update from current session" : "Load a file to update from session";
+    updateFromSessionBtn.disabled    = !parsedData;
+    updateFromSessionBtn.title       = "Replaces stored columns, renames, and value mappings with current session state";
+    updateFromSessionBtn.addEventListener("click", () => {
+      // Stamp current viewState into the preset object (in memory only — saved on confirm)
+      const renames = {};
+      viewState.visibleFields.forEach(f => { renames[f] = viewState.displayNames[f] || f; });
+      const valueMappings = {};
+      viewState.appliedMappings.forEach(({ column, from, to }) => {
+        if (!valueMappings[column]) valueMappings[column] = {};
+        valueMappings[column][from] = to;
+      });
+      preset = { ...preset, keepFields: [...viewState.visibleFields], renameFields: renames, valueMapping: valueMappings };
+      refreshSessionInfo();
+      updateFromSessionBtn.textContent = "✓ Updated from session";
+      setTimeout(() => { updateFromSessionBtn.textContent = "↻ Update from current session"; }, 2000);
+    });
+    panel.appendChild(updateFromSessionBtn);
+
+    // ── Row filters ──────────────────────────────────────────────────────────
+    const rfLabel = document.createElement("div");
+    rfLabel.className   = "panel-label";
+    rfLabel.style.marginTop = "0.5rem";
+    rfLabel.textContent = "ROW FILTERS";
+    panel.appendChild(rfLabel);
+
+    const rfList = document.createElement("div");
+    rfList.className = "rf-list";
+    panel.appendChild(rfList);
+
+    function addRfRow(initField = "", initOp = "eq", initVal = "") {
+      const row = document.createElement("div");
+      row.className = "rf-row";
+
+      const fieldSel = document.createElement("select");
+      fieldSel.className = "panel-select rf-field-select";
+      const phOpt = document.createElement("option");
+      phOpt.value = ""; phOpt.textContent = "Column…";
+      fieldSel.appendChild(phOpt);
+
+      // Use current data fields if available, otherwise use preset's keepFields
+      const availableFields = parsedData
+        ? parsedData.fields.filter(f => f !== NOTE_COL)
+        : (preset.keepFields || []);
+      availableFields.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = (parsedData ? viewState.displayNames[f] : (preset.renameFields?.[f])) || f;
+        if (f === initField) opt.selected = true;
+        fieldSel.appendChild(opt);
+      });
+
+      const opSel = document.createElement("select");
+      opSel.className = "panel-select rf-op-select";
+      OP_OPTIONS.forEach(({ value, label }) => {
+        const opt = document.createElement("option");
+        opt.value = value; opt.textContent = label;
+        if (value === initOp) opt.selected = true;
+        opSel.appendChild(opt);
+      });
+
+      const valInput = document.createElement("input");
+      valInput.type        = "text";
+      valInput.className   = "panel-input rf-val-input";
+      valInput.placeholder = "Value…";
+      valInput.value       = initVal;
+
+      function syncValVisibility() {
+        const op = opSel.value;
+        valInput.style.display = (op === "empty" || op === "notempty") ? "none" : "";
+      }
+      opSel.addEventListener("change", syncValVisibility);
+      syncValVisibility();
+
+      const removeBtn = document.createElement("button");
+      removeBtn.className   = "btn btn-ghost";
+      removeBtn.style.cssText = "padding:0.1rem 0.3rem;font-size:0.7rem;flex-shrink:0;";
+      removeBtn.textContent = "✕";
+      removeBtn.addEventListener("click", () => row.remove());
+
+      row.appendChild(fieldSel);
+      row.appendChild(opSel);
+      row.appendChild(valInput);
+      row.appendChild(removeBtn);
+      rfList.appendChild(row);
+    }
+
+    // Pre-populate with existing filters
+    if (preset.rowFilters?.length) {
+      preset.rowFilters.forEach(rf => addRfRow(rf.field, rf.op, rf.value || ""));
+    } else {
+      addRfRow();
+    }
+
+    const addRfBtn = document.createElement("button");
+    addRfBtn.className   = "btn btn-ghost";
+    addRfBtn.style.cssText = "font-size:0.72rem;padding:0.15rem 0.45rem;margin-top:0.1rem;";
+    addRfBtn.textContent = "+ Add filter rule";
+    addRfBtn.addEventListener("click", () => addRfRow());
+    panel.appendChild(addRfBtn);
+
+    // ── Save / Cancel ────────────────────────────────────────────────────────
+    const footer = document.createElement("div");
+    footer.style.cssText = "display:flex;gap:0.3rem;margin-top:0.5rem;";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className   = "btn";
+    saveBtn.style.cssText = "font-size:0.75rem;padding:0.3rem 0.65rem;";
+    saveBtn.textContent = "Save changes";
+    saveBtn.addEventListener("click", () => {
+      const newName = nameInput.value.trim() || preset.label;
+
+      const newFilters = [];
+      rfList.querySelectorAll(".rf-row").forEach(row => {
+        const field = row.querySelector(".rf-field-select").value;
+        const op    = row.querySelector(".rf-op-select").value;
+        const value = row.querySelector(".rf-val-input").value.trim();
+        if (!field || !op) return;
+        if (op === "empty" || op === "notempty" || value) {
+          newFilters.push({ field, op, value: (op === "empty" || op === "notempty") ? "" : value });
+        }
+      });
+
+      const map = loadUserPresets();
+      if (map[preset.id]) {
+        map[preset.id] = {
+          ...preset,
+          label:      newName,
+          rowFilters: newFilters,
+          savedAt:    Date.now(),
+        };
+        saveUserPresets(map);
+      }
+      renderDrawerPanel("presets");
+    });
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className   = "btn btn-ghost";
+    cancelBtn.style.cssText = "font-size:0.75rem;padding:0.3rem 0.65rem;";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => renderDrawerPanel("presets"));
+
+    footer.appendChild(saveBtn);
+    footer.appendChild(cancelBtn);
+    panel.appendChild(footer);
+
+    parentRow.appendChild(panel);
+    nameInput.focus();
+    nameInput.select();
   }
   function buildMappingPanel(container) {
     if (!parsedData) {

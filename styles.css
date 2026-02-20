@@ -1287,6 +1287,18 @@ body {
 }
 .rb-remove-btn:hover { color: #f87171; background: rgba(239,68,68,0.1); }
 
+/* Preset inline edit panel */
+.preset-edit-panel {
+  margin-top: 0.4rem;
+  padding: 0.55rem 0.6rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
 /* Drag handle and states for column reorder */
 .col-drag-handle {
   cursor: grab;
