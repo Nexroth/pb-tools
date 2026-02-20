@@ -1569,6 +1569,250 @@
       renderSummaryPanel();
     });
     container.appendChild(runCleanBtn);
+
+    // ── Join / Lookup ─────────────────────────────────────────────────────────
+    const joinDivider = document.createElement("div");
+    joinDivider.className = "panel-divider";
+    joinDivider.style.margin = "0.6rem 0 0.1rem";
+    container.appendChild(joinDivider);
+
+    const joinSection = panelSection("JOIN / LOOKUP");
+
+    const joinHint = document.createElement("div");
+    joinHint.className   = "panel-hint";
+    joinHint.textContent = "Load a second file (e.g. master list) and pull columns from it into your current data by matching on a shared key.";
+    joinSection.appendChild(joinHint);
+
+    // Lookup file drop zone
+    const joinDropzone = document.createElement("div");
+    joinDropzone.className = "join-dropzone";
+    joinDropzone.id        = "joinDropzone";
+    joinDropzone.innerHTML = `<span>⬇ Drop lookup file here or click to browse</span>`;
+    joinSection.appendChild(joinDropzone);
+
+    const joinFileInput = document.createElement("input");
+    joinFileInput.type   = "file";
+    joinFileInput.accept = ".csv,.txt,.xlsx";
+    joinFileInput.style.display = "none";
+    joinSection.appendChild(joinFileInput);
+
+    // Lookup file status
+    const joinFileStatus = document.createElement("div");
+    joinFileStatus.className = "panel-hint";
+    joinFileStatus.id        = "joinFileStatus";
+    joinSection.appendChild(joinFileStatus);
+
+    container.appendChild(joinSection);
+
+    // Config area — shown after lookup file is loaded
+    const joinConfig = document.createElement("div");
+    joinConfig.id = "joinConfig";
+    joinConfig.style.display = "none";
+    joinConfig.style.display = "flex";
+    joinConfig.style.flexDirection = "column";
+    joinConfig.style.gap = "0.35rem";
+    joinConfig.style.display = "none";
+    container.appendChild(joinConfig);
+
+    // State for lookup file
+    let lookupData = null; // { fields, rows }
+
+    function buildJoinConfig() {
+      joinConfig.innerHTML = "";
+      joinConfig.style.display = "flex";
+
+      // Key column in current file
+      const keyALabel = document.createElement("div");
+      keyALabel.className   = "panel-label";
+      keyALabel.textContent = "Match key — current file";
+      joinConfig.appendChild(keyALabel);
+
+      const keyASelect = document.createElement("select");
+      keyASelect.className = "panel-select";
+      keyASelect.id        = "joinKeyA";
+      const phA = document.createElement("option");
+      phA.value = ""; phA.textContent = "Select column…";
+      keyASelect.appendChild(phA);
+      parsedData.fields.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = viewState.displayNames[f] || f;
+        keyASelect.appendChild(opt);
+      });
+      joinConfig.appendChild(keyASelect);
+
+      // Key column in lookup file
+      const keyBLabel = document.createElement("div");
+      keyBLabel.className   = "panel-label";
+      keyBLabel.textContent = "Match key — lookup file";
+      joinConfig.appendChild(keyBLabel);
+
+      const keyBSelect = document.createElement("select");
+      keyBSelect.className = "panel-select";
+      keyBSelect.id        = "joinKeyB";
+      const phB = document.createElement("option");
+      phB.value = ""; phB.textContent = "Select column…";
+      keyBSelect.appendChild(phB);
+      lookupData.fields.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f; opt.textContent = f;
+        keyBSelect.appendChild(opt);
+      });
+      joinConfig.appendChild(keyBSelect);
+
+      // Columns to import
+      const importLabel = document.createElement("div");
+      importLabel.className   = "panel-label";
+      importLabel.textContent = "Columns to bring in";
+      joinConfig.appendChild(importLabel);
+
+      const importList = document.createElement("div");
+      importList.className = "join-import-list";
+      importList.id        = "joinImportList";
+
+      lookupData.fields.forEach(f => {
+        const row = document.createElement("label");
+        row.className = "join-import-row";
+        const cb  = document.createElement("input");
+        cb.type   = "checkbox";
+        cb.value  = f;
+        cb.checked = true;
+        const span = document.createElement("span");
+        span.textContent = f;
+        row.appendChild(cb);
+        row.appendChild(span);
+        importList.appendChild(row);
+      });
+      joinConfig.appendChild(importList);
+
+      // Fallback for no match
+      const fallbackLabel = document.createElement("div");
+      fallbackLabel.className   = "panel-label";
+      fallbackLabel.textContent = "Value when no match found";
+      joinConfig.appendChild(fallbackLabel);
+
+      const fallbackInput = document.createElement("input");
+      fallbackInput.type        = "text";
+      fallbackInput.className   = "panel-input";
+      fallbackInput.placeholder = "(leave blank)";
+      fallbackInput.value       = "";
+      joinConfig.appendChild(fallbackInput);
+
+      // Case-sensitive toggle
+      const caseRow = document.createElement("label");
+      caseRow.className = "radio-row";
+      const caseCb = document.createElement("input");
+      caseCb.type    = "checkbox";
+      caseCb.id      = "joinCaseSensitive";
+      caseCb.checked = false;
+      const caseSpan = document.createElement("span");
+      caseSpan.textContent = "Case-sensitive matching";
+      caseRow.appendChild(caseCb);
+      caseRow.appendChild(caseSpan);
+      joinConfig.appendChild(caseRow);
+
+      // Result message
+      const joinMsg = document.createElement("div");
+      joinMsg.className = "panel-hint";
+      joinMsg.id        = "joinMsg";
+      joinConfig.appendChild(joinMsg);
+
+      // Apply button
+      const applyJoinBtn = applyButton("Apply lookup");
+      applyJoinBtn.addEventListener("click", () => {
+        const keyA        = keyASelect.value;
+        const keyB        = keyBSelect.value;
+        const caseSens    = caseCb.checked;
+        const fallback    = fallbackInput.value;
+        const importFields = [...importList.querySelectorAll("input:checked")].map(cb => cb.value).filter(f => f !== keyB);
+
+        if (!keyA || !keyB) {
+          joinMsg.textContent = "Select key columns on both sides.";
+          joinMsg.style.color = "#f87171";
+          return;
+        }
+        if (!importFields.length) {
+          joinMsg.textContent = "Select at least one column to bring in.";
+          joinMsg.style.color = "#f87171";
+          return;
+        }
+
+        saveUndoSnapshot();
+
+        // Build lookup index from lookup file: keyValue -> row
+        const lookupIndex = {};
+        lookupData.rows.forEach(row => {
+          const raw = row[keyB] == null ? "" : String(row[keyB]);
+          const key = caseSens ? raw.trim() : raw.trim().toLowerCase();
+          if (!lookupIndex[key]) lookupIndex[key] = row; // keep first match
+        });
+
+        // Add new columns to parsedData if not already present
+        importFields.forEach(f => {
+          if (!parsedData.fields.includes(f)) {
+            parsedData.fields.push(f);
+            viewState.visibleFields.push(f);
+            viewState.displayNames[f] = f;
+          }
+        });
+
+        let matched = 0;
+        let unmatched = 0;
+
+        parsedData.rows.forEach(row => {
+          const raw    = row[keyA] == null ? "" : String(row[keyA]);
+          const key    = caseSens ? raw.trim() : raw.trim().toLowerCase();
+          const source = lookupIndex[key];
+
+          importFields.forEach(f => {
+            if (source) {
+              row[f] = source[f] ?? fallback;
+            } else {
+              if (row[f] === undefined) row[f] = fallback;
+            }
+          });
+
+          if (source) matched++; else unmatched++;
+        });
+
+        joinMsg.textContent = `✓ Matched ${matched.toLocaleString()} rows. ${unmatched > 0 ? `${unmatched.toLocaleString()} rows had no match (set to "${fallback || "blank"}").` : "All rows matched."}`;
+        joinMsg.style.color = unmatched > 0 ? "#f59e0b" : "#4ade80";
+
+        renderColumnsPanel(parsedData.fields);
+        renderTablePreview();
+        renderSummaryPanel();
+      });
+      joinConfig.appendChild(applyJoinBtn);
+    }
+
+    function handleLookupFile(file) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        dynamicTyping: false,
+        complete: results => {
+          lookupData = { fields: results.meta.fields || [], rows: results.data || [] };
+          joinFileStatus.textContent = `✓ ${file.name} — ${lookupData.rows.length.toLocaleString()} rows, ${lookupData.fields.length} columns`;
+          joinFileStatus.style.color = "#4ade80";
+          buildJoinConfig();
+        },
+        error: err => {
+          joinFileStatus.textContent = `Error: ${err.message}`;
+          joinFileStatus.style.color = "#f87171";
+        },
+      });
+    }
+
+    joinDropzone.addEventListener("click", () => { joinFileInput.value = ""; joinFileInput.click(); });
+    joinFileInput.addEventListener("change", e => { const f = e.target.files?.[0]; if (f) handleLookupFile(f); });
+    joinDropzone.addEventListener("dragover",  e => { e.preventDefault(); joinDropzone.classList.add("dragover"); });
+    joinDropzone.addEventListener("dragleave", e => { e.preventDefault(); joinDropzone.classList.remove("dragover"); });
+    joinDropzone.addEventListener("drop", e => {
+      e.preventDefault();
+      joinDropzone.classList.remove("dragover");
+      const f = e.dataTransfer.files?.[0];
+      if (f) handleLookupFile(f);
+    });
   }
 
   // ── Row selection state ───────────────────────────────────────────────────
