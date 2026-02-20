@@ -37,6 +37,7 @@
     appliedMappings: [],  // [{ column, from, to }, ...] — log of every mapping applied, for preset capture
   };
   let lastSummary   = null;   // { field, rows: [{ value, count }] }
+  let undoSnapshot  = null;   // single undo — deep copy of parsedData.rows before last destructive op
   let sortState     = { field: null, dir: "asc" };
   let filterState   = { text: "", field: "" };  // "" field = search all columns
 
@@ -126,10 +127,34 @@
     },
   };
 
+  // ── Undo ─────────────────────────────────────────────────────────────────
+
+  function saveUndoSnapshot() {
+    if (!parsedData) return;
+    undoSnapshot = parsedData.rows.map(row => ({ ...row }));
+    updateUndoBtn();
+  }
+
+  function applyUndo() {
+    if (!undoSnapshot || !parsedData) return;
+    parsedData.rows = undoSnapshot;
+    undoSnapshot = null;
+    updateUndoBtn();
+    renderTablePreview();
+    renderSummaryPanel();
+    updateFileInfo();
+  }
+
+  function updateUndoBtn() {
+    const btn = document.getElementById("csvUndoBtn");
+    if (btn) btn.disabled = !undoSnapshot;
+  }
+
   // ── Business logic ────────────────────────────────────────────────────────
 
   function applyValueMappings(valueMapping, skipLog = false) {
     if (!parsedData || !valueMapping || typeof valueMapping !== "object") return;
+    if (!skipLog) saveUndoSnapshot();
 
     const displayToField = {};
     Object.keys(viewState.displayNames).forEach(f => {
@@ -164,6 +189,7 @@
 
   function applyPhisherLikePreset() {
     if (!parsedData) return;
+    saveUndoSnapshot();
     const preset    = presets.phisherLike;
     const keepSet   = new Set(preset.keepFields);
     const effective = parsedData.fields.filter(f => keepSet.has(f));
@@ -318,6 +344,7 @@
 
     parsedData  = { fields, rows: rawRows };
     lastSummary = null;
+    undoSnapshot = null;
     sortState   = { field: null, dir: "asc" };
     filterState = { text: "", field: "" };
     selectedRows.clear();
@@ -444,6 +471,9 @@
         <div class="csv-infobar" id="csvInfoBar">
           <div class="csv-file-info" id="csvFileInfo"></div>
           <div class="csv-toolbar-actions">
+            <button class="btn btn-secondary" id="csvUndoBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;" disabled title="Undo last operation">
+              ↩ Undo
+            </button>
             <button class="btn btn-secondary" id="csvDownloadBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;" disabled>
               ↓ CSV
             </button>
@@ -545,6 +575,10 @@
     // CSV quick-download
     const dlBtn = root.querySelector("#csvDownloadBtn");
     if (dlBtn) dlBtn.addEventListener("click", () => downloadCurrentCsv());
+
+    // Undo
+    const undoBtn = root.querySelector("#csvUndoBtn");
+    if (undoBtn) undoBtn.addEventListener("click", () => applyUndo());
 
     // Rail buttons
     const rail = root.querySelector("#opsRail");
@@ -827,9 +861,6 @@
       const row = document.createElement("div");
       row.className = "preset-list-row";
 
-      const info = document.createElement("div");
-      info.className = "preset-list-info";
-
       const nameEl = document.createElement("div");
       nameEl.className   = "preset-list-name";
       nameEl.textContent = p.label;
@@ -839,11 +870,13 @@
       descEl.className   = "preset-list-desc";
       descEl.textContent = p.description;
 
-      info.appendChild(nameEl);
-      info.appendChild(descEl);
-      row.appendChild(info);
+      row.appendChild(nameEl);
+      row.appendChild(descEl);
 
       if (parsedData) {
+        const actions = document.createElement("div");
+        actions.className = "preset-list-actions";
+
         const applyBtn = document.createElement("button");
         applyBtn.className   = "btn btn-ghost preset-apply-btn";
         applyBtn.textContent = viewState.activePreset === p.id ? "✓ Applied" : "Apply";
@@ -855,7 +888,8 @@
           renderSummaryPanel();
           renderDrawerPanel("presets");
         });
-        row.appendChild(applyBtn);
+        actions.appendChild(applyBtn);
+        row.appendChild(actions);
       }
 
       builtinSection.appendChild(row);
@@ -875,12 +909,11 @@
       empty.textContent = 'No saved presets yet. Shape your data then use "Save as preset" below.';
       userSection.appendChild(empty);
     } else {
+      const scrollWrap = document.createElement("div");
+      scrollWrap.className = "preset-user-scroll";
       allUserPresets.forEach(p => {
         const row = document.createElement("div");
         row.className = "preset-list-row";
-
-        const info = document.createElement("div");
-        info.className = "preset-list-info";
 
         const nameEl = document.createElement("div");
         nameEl.className   = "preset-list-name";
@@ -891,9 +924,8 @@
         descEl.className   = "preset-list-desc";
         descEl.textContent = p.description;
 
-        info.appendChild(nameEl);
-        info.appendChild(descEl);
-        row.appendChild(info);
+        row.appendChild(nameEl);
+        row.appendChild(descEl);
 
         const actions = document.createElement("div");
         actions.className = "preset-list-actions";
@@ -901,7 +933,7 @@
         if (parsedData) {
           const applyBtn = document.createElement("button");
           applyBtn.className   = "btn btn-ghost preset-apply-btn";
-          applyBtn.textContent = viewState.activePreset === p.id ? "✓" : "Apply";
+          applyBtn.textContent = viewState.activePreset === p.id ? "✓ Applied" : "Apply";
           applyBtn.disabled    = viewState.activePreset === p.id;
           applyBtn.addEventListener("click", () => {
             applyUserPreset(p);
@@ -912,26 +944,20 @@
 
         const exportBtn = document.createElement("button");
         exportBtn.className   = "btn btn-ghost";
-        exportBtn.textContent = "⬆";
+        exportBtn.textContent = "⬆ Export";
         exportBtn.title       = "Export preset as JSON";
         exportBtn.addEventListener("click", () => exportPresetAsJson(p));
         actions.appendChild(exportBtn);
 
-        // Rename button
         const renameBtn = document.createElement("button");
         renameBtn.className   = "btn btn-ghost";
-        renameBtn.textContent = "✏";
-        renameBtn.title       = "Rename preset";
+        renameBtn.textContent = "✏ Rename";
         renameBtn.addEventListener("click", () => {
-          const nameEl = row.querySelector(".preset-list-name");
-          if (!nameEl) return;
-
           const currentName = p.label;
           const input = document.createElement("input");
           input.type      = "text";
           input.className = "panel-input";
           input.value     = currentName;
-          input.style.fontSize = "0.78rem";
 
           nameEl.replaceWith(input);
           input.focus();
@@ -940,13 +966,9 @@
           function commitRename() {
             const newName = input.value.trim() || currentName;
             const map = loadUserPresets();
-            if (map[p.id]) {
-              map[p.id].label = newName;
-              saveUserPresets(map);
-            }
+            if (map[p.id]) { map[p.id].label = newName; saveUserPresets(map); }
             renderDrawerPanel("presets");
           }
-
           input.addEventListener("blur", commitRename);
           input.addEventListener("keydown", e => {
             if (e.key === "Enter")  { e.preventDefault(); commitRename(); }
@@ -955,28 +977,22 @@
         });
         actions.appendChild(renameBtn);
 
-        // Delete with inline confirmation
         const deleteBtn = document.createElement("button");
         deleteBtn.className   = "btn btn-ghost preset-delete-btn";
-        deleteBtn.textContent = "✕";
-        deleteBtn.title       = "Delete preset";
+        deleteBtn.textContent = "✕ Delete";
         let deleteTimeout = null;
-        let confirming = false;
-
+        let confirming    = false;
         deleteBtn.addEventListener("click", () => {
           if (!confirming) {
-            // First click — ask for confirmation inline
             confirming = true;
-            deleteBtn.textContent = "Delete?";
+            deleteBtn.textContent = "Sure? (click again)";
             deleteBtn.classList.add("preset-delete-confirming");
             deleteTimeout = setTimeout(() => {
-              // Auto-cancel after 3s
               confirming = false;
-              deleteBtn.textContent = "✕";
+              deleteBtn.textContent = "✕ Delete";
               deleteBtn.classList.remove("preset-delete-confirming");
             }, 3000);
           } else {
-            // Second click — confirmed
             clearTimeout(deleteTimeout);
             const map = loadUserPresets();
             delete map[p.id];
@@ -987,8 +1003,9 @@
         actions.appendChild(deleteBtn);
 
         row.appendChild(actions);
-        userSection.appendChild(row);
+        scrollWrap.appendChild(row);
       });
+      userSection.appendChild(scrollWrap);
     }
 
     container.appendChild(userSection);
@@ -1315,6 +1332,7 @@
     runDedupBtn.addEventListener("click", () => {
       const col = colSelect.value;
       if (!col || !parsedData) return;
+      saveUndoSnapshot();
       const keepLast = keepLastRow.querySelector("input").checked;
       const before   = parsedData.rows.length;
       const seenKeys = new Set();
@@ -1338,18 +1356,139 @@
     });
     container.appendChild(runDedupBtn);
 
-    // Data cleanup (coming soon placeholder)
+    // Data cleanup
     const divider = document.createElement("div");
     divider.className = "panel-divider";
     divider.style.margin = "0.6rem 0 0.1rem";
     container.appendChild(divider);
 
     const cleanSection = panelSection("DATA CLEANUP");
-    const comingSoon   = document.createElement("div");
-    comingSoon.className   = "panel-hint";
-    comingSoon.textContent = "Trim whitespace, normalize case, strip control chars — coming soon.";
-    cleanSection.appendChild(comingSoon);
+
+    if (!parsedData) {
+      const hint = document.createElement("div");
+      hint.className   = "panel-hint";
+      hint.textContent = "Load a file to use cleanup tools.";
+      cleanSection.appendChild(hint);
+      container.appendChild(cleanSection);
+      return;
+    }
+
+    // Column selector
+    const cleanColSelect = document.createElement("select");
+    cleanColSelect.className = "panel-select";
+
+    const cleanPh = document.createElement("option");
+    cleanPh.value       = "";
+    cleanPh.textContent = "Select column… (or all)";
+    cleanColSelect.appendChild(cleanPh);
+
+    const allOpt = document.createElement("option");
+    allOpt.value       = "__all__";
+    allOpt.textContent = "— All visible columns —";
+    cleanColSelect.appendChild(allOpt);
+
+    parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+      const opt       = document.createElement("option");
+      opt.value       = f;
+      opt.textContent = viewState.displayNames[f] || f;
+      cleanColSelect.appendChild(opt);
+    });
+    cleanSection.appendChild(cleanColSelect);
+
+    // Operation selector
+    const opSelect = document.createElement("select");
+    opSelect.className = "panel-select";
+    opSelect.style.marginTop = "0.2rem";
+
+    [
+      { value: "",             label: "Select operation…" },
+      { value: "trim",         label: "Trim whitespace" },
+      { value: "upper",        label: "UPPERCASE" },
+      { value: "lower",        label: "lowercase" },
+      { value: "title",        label: "Title Case" },
+      { value: "strip-ctrl",   label: "Strip control characters" },
+      { value: "to-number",    label: "Convert to number" },
+    ].forEach(({ value, label }) => {
+      const opt = document.createElement("option");
+      opt.value       = value;
+      opt.textContent = label;
+      opSelect.appendChild(opt);
+    });
+    cleanSection.appendChild(opSelect);
+
+    const cleanMsg = document.createElement("div");
+    cleanMsg.className = "panel-hint";
+    cleanMsg.style.marginTop = "0.2rem";
+    cleanSection.appendChild(cleanMsg);
+
     container.appendChild(cleanSection);
+
+    const runCleanBtn = applyButton("Apply cleanup");
+    runCleanBtn.addEventListener("click", () => {
+      const col = cleanColSelect.value;
+      const op  = opSelect.value;
+      if (!col || !op || !parsedData) return;
+      saveUndoSnapshot();
+
+      const targetFields = col === "__all__"
+        ? getEffectiveFields().filter(f => f !== NOTE_COL && !PROTECTED_COLS.has(f))
+        : PROTECTED_COLS.has(col) ? [] : [col];
+
+      if (targetFields.length === 0) {
+        cleanMsg.textContent = "No editable columns selected.";
+        cleanMsg.style.color = "#f87171";
+        return;
+      }
+
+      let changed = 0;
+
+      parsedData.rows.forEach(row => {
+        targetFields.forEach(f => {
+          const raw = row[f];
+          if (raw == null) return;
+          const str = String(raw);
+          let result = str;
+
+          switch (op) {
+            case "trim":
+              result = str.trim();
+              break;
+            case "upper":
+              result = str.toUpperCase();
+              break;
+            case "lower":
+              result = str.toLowerCase();
+              break;
+            case "title":
+              result = str.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+              break;
+            case "strip-ctrl":
+              // Remove control chars (0x00-0x1F, 0x7F) except normal whitespace
+              result = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+              break;
+            case "to-number": {
+              const n = Number(str.replace(/[, ]/g, ""));
+              result = isNaN(n) ? str : String(n);
+              break;
+            }
+          }
+
+          if (result !== str) {
+            row[f] = result;
+            changed++;
+          }
+        });
+      });
+
+      cleanMsg.textContent = changed > 0
+        ? `✓ Updated ${changed.toLocaleString()} cell${changed !== 1 ? "s" : ""}.`
+        : "No changes made.";
+      cleanMsg.style.color = changed > 0 ? "#4ade80" : "#6b7280";
+
+      renderTablePreview();
+      renderSummaryPanel();
+    });
+    container.appendChild(runCleanBtn);
   }
 
   // ── Row selection state ───────────────────────────────────────────────────
@@ -1588,6 +1727,25 @@
       },
       "---",
       {
+        label: selCount > 1 ? `Hide ${selCount} selected rows` : "Hide row",
+        action: () => {
+          saveUndoSnapshot();
+          if (selCount > 1) {
+            const toRemove = new Set(
+              [...selectedRows].map(i => getFilteredSortedRows()[i]).filter(Boolean)
+            );
+            parsedData.rows = parsedData.rows.filter(r => !toRemove.has(r));
+            selectedRows.clear();
+          } else {
+            if (dataIdx >= 0) parsedData.rows.splice(dataIdx, 1);
+          }
+          updateFileInfo();
+          renderTablePreview();
+          renderSummaryPanel();
+        },
+      },
+      "---",
+      {
         label: "Clear note for this row",
         danger: true,
         disabled: !hasNote,
@@ -1635,6 +1793,18 @@
         action: () => {
           const text = allRows.map(r => r[field] ?? "").join("\n");
           navigator.clipboard?.writeText(text);
+        },
+      },
+      "---",
+      {
+        label: "Hide column",
+        action: () => {
+          viewState.visibleFields = viewState.visibleFields.filter(f => f !== field);
+          renderTablePreview();
+          renderSummaryPanel();
+          // Sync checkbox in columns panel if drawer is open
+          const cb = document.querySelector(`#csvColumnsPanel input[type="checkbox"][data-field="${field}"]`);
+          if (cb) cb.checked = false;
         },
       },
     ]);
@@ -1864,7 +2034,7 @@
     select.appendChild(ph);
 
     if (parsedData) {
-      parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+      getEffectiveFields().filter(f => f !== NOTE_COL).forEach(f => {
         const opt       = document.createElement("option");
         opt.value       = f;
         opt.textContent = viewState.displayNames[f] || f;
