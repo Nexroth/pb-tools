@@ -1287,7 +1287,27 @@ body {
 }
 .rb-remove-btn:hover { color: #f87171; background: rgba(239,68,68,0.1); }
 
-/* ==== Row filter bar ==== */
+/* Drag handle and states for column reorder */
+.col-drag-handle {
+  cursor: grab;
+  color: #4b5563;
+  font-size: 0.85rem;
+  padding: 0 0.1rem;
+  flex-shrink: 0;
+  user-select: none;
+  transition: color 0.12s;
+}
+.col-field-row:hover .col-drag-handle { color: #9ca3af; }
+.col-drag-handle:active { cursor: grabbing; }
+
+.col-row-dragging {
+  opacity: 0.4;
+}
+.col-row-over {
+  outline: 1px dashed rgba(34,197,94,0.5);
+  background: rgba(34,197,94,0.05);
+  border-radius: 0.3rem;
+}
 
 .csv-row-filter-bar {
   display: flex;

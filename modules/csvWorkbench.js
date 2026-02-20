@@ -931,62 +931,116 @@
       return;
     }
 
-    const section = panelSection("VISIBLE · RENAME");
+    const section = panelSection("VISIBLE · RENAME · DRAG TO REORDER");
     const list    = document.createElement("div");
-    list.style.display        = "flex";
-    list.style.flexDirection  = "column";
-    list.style.gap            = "0.2rem";
+    list.className        = "col-field-list";
+    list.style.display       = "flex";
+    list.style.flexDirection = "column";
+    list.style.gap           = "0.2rem";
 
-    parsedData.fields.forEach(field => {
+    // Render in current visible order first, then any hidden fields after
+    const ordered = [
+      ...viewState.visibleFields,
+      ...parsedData.fields.filter(f => !viewState.visibleFields.includes(f)),
+    ];
+
+    let dragSrc = null;
+
+    ordered.forEach(field => {
       const row = document.createElement("div");
-      row.className = "col-field-row";
+      row.className        = "col-field-row";
+      row.draggable        = true;
+      row.dataset.field    = field;
+
+      // Drag handle
+      const handle = document.createElement("span");
+      handle.className   = "col-drag-handle";
+      handle.textContent = "⠿";
+      handle.title       = "Drag to reorder";
 
       const cb = document.createElement("input");
-      cb.type        = "checkbox";
-      cb.checked     = viewState.visibleFields.includes(field);
+      cb.type          = "checkbox";
+      cb.checked       = viewState.visibleFields.includes(field);
       cb.dataset.field = field;
 
-      const nameSpan  = document.createElement("span");
-      nameSpan.className    = "col-field-name";
-      nameSpan.textContent  = field;
-      nameSpan.title        = field;
+      const nameSpan = document.createElement("span");
+      nameSpan.className   = "col-field-name";
+      nameSpan.textContent = field;
+      nameSpan.title       = field;
 
       const renameInput = document.createElement("input");
-      renameInput.type        = "text";
-      renameInput.className   = "panel-rename-input";
-      renameInput.value       = viewState.displayNames[field] || field;
+      renameInput.type          = "text";
+      renameInput.className     = "panel-rename-input";
+      renameInput.value         = viewState.displayNames[field] || field;
       renameInput.dataset.field = field;
-      renameInput.placeholder = "Display name";
+      renameInput.placeholder   = "Display name";
 
+      row.appendChild(handle);
       row.appendChild(cb);
       row.appendChild(nameSpan);
       row.appendChild(renameInput);
       list.appendChild(row);
+
+      // Drag events
+      row.addEventListener("dragstart", e => {
+        dragSrc = row;
+        e.dataTransfer.effectAllowed = "move";
+        setTimeout(() => row.classList.add("col-row-dragging"), 0);
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("col-row-dragging");
+        list.querySelectorAll(".col-field-row").forEach(r => r.classList.remove("col-row-over"));
+        dragSrc = null;
+      });
+      row.addEventListener("dragover", e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (dragSrc && dragSrc !== row) {
+          list.querySelectorAll(".col-field-row").forEach(r => r.classList.remove("col-row-over"));
+          row.classList.add("col-row-over");
+        }
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("col-row-over"));
+      row.addEventListener("drop", e => {
+        e.preventDefault();
+        row.classList.remove("col-row-over");
+        if (!dragSrc || dragSrc === row) return;
+
+        // Insert dragSrc before or after target depending on vertical position
+        const rect   = row.getBoundingClientRect();
+        const midY   = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+          list.insertBefore(dragSrc, row);
+        } else {
+          list.insertBefore(dragSrc, row.nextSibling);
+        }
+      });
     });
 
     section.appendChild(list);
     container.appendChild(section);
 
     const applyBtn = applyButton("Apply changes");
-    applyBtn.addEventListener("click", () => applyColumnChanges(container));
+    applyBtn.addEventListener("click", () => applyColumnChanges(list));
     container.appendChild(applyBtn);
   }
 
-  function applyColumnChanges(panelContainer) {
+  function applyColumnChanges(listEl) {
     if (!parsedData) return;
 
+    const newNames = { ...viewState.displayNames };
+
+    // Read order and visibility directly from the current DOM order
     const newVisible = [];
-    const newNames   = { ...viewState.displayNames };
-
-    panelContainer.querySelectorAll("input[type='checkbox'][data-field]").forEach(cb => {
-      if (cb.checked) newVisible.push(cb.dataset.field);
-    });
-    panelContainer.querySelectorAll("input[type='text'][data-field]").forEach(inp => {
-      const f = inp.dataset.field;
-      if (f) newNames[f] = inp.value.trim() || f;
+    listEl.querySelectorAll(".col-field-row[data-field]").forEach(row => {
+      const f  = row.dataset.field;
+      const cb = row.querySelector("input[type='checkbox']");
+      const inp = row.querySelector("input[type='text']");
+      if (inp && f) newNames[f] = inp.value.trim() || f;
+      if (cb?.checked) newVisible.push(f);
     });
 
-    viewState.visibleFields = parsedData.fields.filter(f => newVisible.includes(f));
+    viewState.visibleFields = newVisible;
     viewState.displayNames  = newNames;
 
     renderTablePreview();
