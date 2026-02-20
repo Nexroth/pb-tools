@@ -1287,6 +1287,75 @@ body {
 }
 .rb-remove-btn:hover { color: #f87171; background: rgba(239,68,68,0.1); }
 
+/* ==== Row filter bar ==== */
+
+.csv-row-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.3rem 0.75rem;
+  background: rgba(234, 179, 8, 0.06);
+  border-bottom: 1px solid rgba(234,179,8,0.2);
+  font-size: 0.72rem;
+}
+
+.row-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(234,179,8,0.12);
+  border: 1px solid rgba(234,179,8,0.35);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem 0.1rem 0.55rem;
+  color: #fde68a;
+  white-space: nowrap;
+}
+
+.row-filter-remove {
+  background: none;
+  border: none;
+  color: #fde68a;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.65rem;
+  line-height: 1;
+  opacity: 0.7;
+}
+.row-filter-remove:hover { opacity: 1; color: #f87171; }
+
+/* ==== Preset row filter builder (save section) ==== */
+
+.rf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.2rem 0;
+}
+
+.rf-row {
+  display: flex;
+  gap: 0.2rem;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.rf-field-select { flex: 1.2; min-width: 0; }
+.rf-op-select    { flex: 1; min-width: 0; }
+.rf-val-input    { flex: 1; min-width: 0; }
+
+/* Preset row filter summary badge in preset card */
+.preset-rf-summary {
+  font-size: 0.68rem;
+  color: #fde68a;
+  background: rgba(234,179,8,0.08);
+  border: 1px solid rgba(234,179,8,0.2);
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.4rem;
+  margin-top: 0.15rem;
+  line-height: 1.4;
+}
+
 /* ==== Join / Lookup ==== */
 
 .join-dropzone {

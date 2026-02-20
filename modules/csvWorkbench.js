@@ -40,6 +40,7 @@
   let undoSnapshot  = null;   // single undo — deep copy of parsedData.rows before last destructive op
   let sortState     = { field: null, dir: "asc" };
   let filterState   = { text: "", field: "" };  // "" field = search all columns
+  let rowFilters    = [];  // [{ field, op, value }] — preset-applied exact filters; op: "eq"|"neq"|"contains"|"empty"|"notempty"
 
   // ── Drawer state ──────────────────────────────────────────────────────────
   let drawerState   = { open: false, panel: null };
@@ -275,13 +276,27 @@
   function getFilteredSortedRows() {
     const sorted = getSortedRows();
     const needle = filterState.text.trim().toLowerCase();
-    if (!needle) return sorted;
 
-    const fields = filterState.field
-      ? [filterState.field]
-      : getEffectiveFields();
+    // Apply preset row filters first
+    let filtered = sorted;
+    if (rowFilters.length) {
+      filtered = sorted.filter(row => rowFilters.every(rf => {
+        const cell = String(row[rf.field] ?? "");
+        switch (rf.op) {
+          case "eq":       return cell.toLowerCase() === rf.value.toLowerCase();
+          case "neq":      return cell.toLowerCase() !== rf.value.toLowerCase();
+          case "contains": return cell.toLowerCase().includes(rf.value.toLowerCase());
+          case "empty":    return cell.trim() === "";
+          case "notempty": return cell.trim() !== "";
+          default:         return true;
+        }
+      }));
+    }
 
-    return sorted.filter(row =>
+    // Then apply text search on top
+    if (!needle) return filtered;
+    const fields = filterState.field ? [filterState.field] : getEffectiveFields();
+    return filtered.filter(row =>
       fields.some(f => String(row[f] ?? "").toLowerCase().includes(needle))
     );
   }
@@ -347,6 +362,7 @@
     undoSnapshot = null;
     sortState   = { field: null, dir: "asc" };
     filterState = { text: "", field: "" };
+    rowFilters  = [];
     selectedRows.clear();
     lastSelectedRow = null;
     viewState = {
@@ -580,6 +596,9 @@
           <button class="search-clear" id="csvSearchClear" title="Clear search" style="display:none;">✕</button>
         </div>
 
+        <!-- Row 4: Active row filter badges (hidden when empty) -->
+        <div class="csv-row-filter-bar" id="csvRowFilterBar" style="display:none;"></div>
+
         <!-- Workspace: rail | drawer | content -->
         <div class="csv-workspace">
 
@@ -618,6 +637,7 @@
     if (drawerState.open && drawerState.panel) {
       openDrawer(drawerState.panel);
     }
+    renderRowFilterBadges();
     renderTablePreview();
     renderSummaryPanel();
   }
@@ -713,6 +733,48 @@
         renderTablePreview();
       });
     }
+  }
+
+  function renderRowFilterBadges() {
+    const bar = document.getElementById("csvRowFilterBar");
+    if (!bar) return;
+    bar.innerHTML = "";
+    if (!rowFilters.length) {
+      bar.style.display = "none";
+      return;
+    }
+    bar.style.display = "flex";
+
+    const OP_LABELS = { eq: "=", neq: "≠", contains: "contains", empty: "is empty", notempty: "is not empty" };
+
+    rowFilters.forEach((rf, i) => {
+      const badge = document.createElement("div");
+      badge.className = "row-filter-badge";
+      const fieldLabel = viewState.displayNames[rf.field] || rf.field;
+      const opLabel    = OP_LABELS[rf.op] || rf.op;
+      const valLabel   = (rf.op === "empty" || rf.op === "notempty") ? "" : ` "${rf.value}"`;
+      badge.innerHTML  = `<span>${fieldLabel} ${opLabel}${valLabel}</span><button class="row-filter-remove" data-idx="${i}" title="Remove filter">✕</button>`;
+      bar.appendChild(badge);
+    });
+
+    const clearAll = document.createElement("button");
+    clearAll.className   = "btn btn-ghost";
+    clearAll.style.cssText = "font-size:0.68rem;padding:0.1rem 0.4rem;";
+    clearAll.textContent = "Clear all filters";
+    clearAll.addEventListener("click", () => {
+      rowFilters = [];
+      renderRowFilterBadges();
+      renderTablePreview();
+    });
+    bar.appendChild(clearAll);
+
+    bar.querySelectorAll(".row-filter-remove").forEach(btn => {
+      btn.addEventListener("click", () => {
+        rowFilters.splice(parseInt(btn.dataset.idx), 1);
+        renderRowFilterBadges();
+        renderTablePreview();
+      });
+    });
   }
 
   function populateSearchFieldSelect(select) {
@@ -829,7 +891,7 @@
     try { localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(map)); } catch {}
   }
 
-  function captureCurrentAsPreset(name) {
+  function captureCurrentAsPreset(name, capturedRowFilters) {
     if (!parsedData) return null;
 
     // Save display names for all visible fields (not just deltas)
@@ -854,6 +916,7 @@
       keepFields:   [...viewState.visibleFields],
       renameFields: renames,
       valueMapping: valueMappings,
+      rowFilters:   capturedRowFilters || [],
       isUserPreset: true,
       savedAt:      Date.now(),
     };
@@ -1007,6 +1070,20 @@
         row.appendChild(nameEl);
         row.appendChild(descEl);
 
+        // Show row filter summary if preset has any
+        if (p.rowFilters?.length) {
+          const rfSummary = document.createElement("div");
+          rfSummary.className = "preset-rf-summary";
+          const OP_LABELS = { eq: "=", neq: "≠", contains: "contains", empty: "is empty", notempty: "is not empty" };
+          rfSummary.textContent = "Filters: " + p.rowFilters.map(rf => {
+            const fieldLabel = rf.field;
+            const opLabel    = OP_LABELS[rf.op] || rf.op;
+            const valLabel   = (rf.op === "empty" || rf.op === "notempty") ? "" : ` "${rf.value}"`;
+            return `${fieldLabel} ${opLabel}${valLabel}`;
+          }).join(" AND ");
+          row.appendChild(rfSummary);
+        }
+
         const actions = document.createElement("div");
         actions.className = "preset-list-actions";
 
@@ -1113,7 +1190,114 @@
       saveStatus.style.marginTop = "0.2rem";
 
       saveSection.appendChild(nameInput);
+
+      // ── Row filter builder ───────────────────────────────────────────────
+      const rfLabel = document.createElement("div");
+      rfLabel.className   = "panel-label";
+      rfLabel.style.marginTop = "0.4rem";
+      rfLabel.textContent = "ROW FILTERS (optional)";
+      saveSection.appendChild(rfLabel);
+
+      const rfHint = document.createElement("div");
+      rfHint.className   = "panel-hint";
+      rfHint.textContent = "Only show rows matching these conditions when preset is applied.";
+      saveSection.appendChild(rfHint);
+
+      const rfList = document.createElement("div");
+      rfList.className = "rf-list";
+      saveSection.appendChild(rfList);
+
+      const OP_OPTIONS = [
+        { value: "eq",       label: "equals" },
+        { value: "neq",      label: "not equals" },
+        { value: "contains", label: "contains" },
+        { value: "empty",    label: "is empty" },
+        { value: "notempty", label: "is not empty" },
+      ];
+
+      function addRfRow(initField = "", initOp = "eq", initVal = "") {
+        const row = document.createElement("div");
+        row.className = "rf-row";
+
+        const fieldSel = document.createElement("select");
+        fieldSel.className = "panel-select rf-field-select";
+        const ph = document.createElement("option");
+        ph.value = ""; ph.textContent = "Column…";
+        fieldSel.appendChild(ph);
+        parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+          const opt = document.createElement("option");
+          opt.value = f;
+          opt.textContent = viewState.displayNames[f] || f;
+          if (f === initField) opt.selected = true;
+          fieldSel.appendChild(opt);
+        });
+
+        const opSel = document.createElement("select");
+        opSel.className = "panel-select rf-op-select";
+        OP_OPTIONS.forEach(({ value, label }) => {
+          const opt = document.createElement("option");
+          opt.value = value; opt.textContent = label;
+          if (value === initOp) opt.selected = true;
+          opSel.appendChild(opt);
+        });
+
+        const valInput = document.createElement("input");
+        valInput.type        = "text";
+        valInput.className   = "panel-input rf-val-input";
+        valInput.placeholder = "Value…";
+        valInput.value       = initVal;
+
+        // Hide value input for empty/notempty
+        function syncValVisibility() {
+          const op = opSel.value;
+          valInput.style.display = (op === "empty" || op === "notempty") ? "none" : "";
+        }
+        opSel.addEventListener("change", syncValVisibility);
+        syncValVisibility();
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className   = "btn btn-ghost";
+        removeBtn.style.cssText = "padding:0.1rem 0.3rem;font-size:0.7rem;flex-shrink:0;";
+        removeBtn.textContent = "✕";
+        removeBtn.title       = "Remove filter";
+        removeBtn.addEventListener("click", () => row.remove());
+
+        row.appendChild(fieldSel);
+        row.appendChild(opSel);
+        row.appendChild(valInput);
+        row.appendChild(removeBtn);
+        rfList.appendChild(row);
+      }
+
+      // Pre-populate with existing rowFilters if any are active
+      if (rowFilters.length) {
+        rowFilters.forEach(rf => addRfRow(rf.field, rf.op, rf.value || ""));
+      } else {
+        addRfRow(); // start with one blank row
+      }
+
+      const addRfBtn = document.createElement("button");
+      addRfBtn.className   = "btn btn-ghost";
+      addRfBtn.style.cssText = "font-size:0.72rem;padding:0.15rem 0.45rem;align-self:flex-start;margin-top:0.1rem;";
+      addRfBtn.textContent = "+ Add filter rule";
+      addRfBtn.addEventListener("click", () => addRfRow());
+      saveSection.appendChild(addRfBtn);
+
       saveSection.appendChild(saveStatus);
+
+      function collectRowFilters() {
+        const filters = [];
+        rfList.querySelectorAll(".rf-row").forEach(row => {
+          const field = row.querySelector(".rf-field-select").value;
+          const op    = row.querySelector(".rf-op-select").value;
+          const value = row.querySelector(".rf-val-input").value.trim();
+          if (!field || !op) return;
+          if ((op === "empty" || op === "notempty") || value) {
+            filters.push({ field, op, value: op === "empty" || op === "notempty" ? "" : value });
+          }
+        });
+        return filters;
+      }
 
       const saveBtn = applyButton("Save as preset");
       saveBtn.style.marginTop = "0.25rem";
@@ -1121,16 +1305,14 @@
         const name = nameInput.value.trim();
         if (!name) { nameInput.focus(); return; }
 
+        const capturedFilters = collectRowFilters();
         const map      = loadUserPresets();
         const existing = Object.values(map).find(p => p.label.toLowerCase() === name.toLowerCase());
 
         if (existing) {
-          // Duplicate name — ask to overwrite
           if (saveStatus.dataset.awaitingOverwrite === "1") {
-            // Second click — overwrite confirmed
-            const preset = captureCurrentAsPreset(name);
+            const preset = captureCurrentAsPreset(name, capturedFilters);
             if (!preset) return;
-            // Keep the existing ID so it replaces in-place
             preset.id = existing.id;
             map[preset.id] = preset;
             saveUserPresets(map);
@@ -1139,7 +1321,6 @@
             saveStatus.dataset.awaitingOverwrite = "";
             renderDrawerPanel("presets");
           } else {
-            // First click — warn
             saveStatus.textContent = `"${name}" already exists. Click Save again to overwrite.`;
             saveStatus.style.color = "#f59e0b";
             saveStatus.dataset.awaitingOverwrite = "1";
@@ -1149,8 +1330,7 @@
             }, 4000);
           }
         } else {
-          // No conflict — save normally
-          const preset = captureCurrentAsPreset(name);
+          const preset = captureCurrentAsPreset(name, capturedFilters);
           if (!preset) return;
           map[preset.id] = preset;
           saveUserPresets(map);
@@ -1246,6 +1426,10 @@
     if (preset.valueMapping) {
       applyValueMappings(preset.valueMapping, true);
     }
+
+    // Apply row filters
+    rowFilters = (preset.rowFilters || []).filter(rf => rf.field && rf.op);
+    renderRowFilterBadges();
 
     viewState.activePreset = preset.id;
     updateFileInfo();
