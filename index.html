@@ -8,6 +8,7 @@
   >
   <title>PB Tools</title>
 
+  <!-- Security-related meta -->
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta
     http-equiv="Content-Security-Policy"
@@ -29,8 +30,7 @@
 </head>
 <body>
   <div id="app">
-
-    <!-- App sidebar — module navigation -->
+    <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="logo-circle">P</div>
@@ -42,28 +42,59 @@
           class="sidebar-toggle"
           id="sidebarToggleButton"
           aria-label="Toggle sidebar"
-        >‹</button>
+        >
+          ‹
+        </button>
       </div>
 
       <nav class="sidebar-nav">
-        <button class="nav-item active" data-module="csvWorkbench">
+        <button
+          class="nav-item active"
+          data-module="csvWorkbench"
+        >
           <span class="nav-icon">📊</span>
           <span class="nav-label">CSV Workbench</span>
         </button>
 
-        <button class="nav-item" data-module="reportBuilder">
-          <span class="nav-icon">📈</span>
+        <button
+          class="nav-item"
+          data-module="reportBuilder"
+
+        >
+          <span class="nav-icon">📄</span>
           <span class="nav-label">Report Builder</span>
         </button>
 
-        <button class="nav-item" data-module="settings">
-          <span class="nav-icon">⚙️</span>
-          <span class="nav-label">Settings</span>
+        <button
+          class="nav-item"
+          data-module="emailTemplater"
+        >
+          <span class="nav-icon">✉️</span>
+          <span class="nav-label">Email Templater</span>
         </button>
 
-        <button class="nav-item" data-module="placeholder" disabled title="Coming soon">
-          <span class="nav-icon">🧩</span>
-          <span class="nav-label">Coming soon</span>
+        <button
+          class="nav-item"
+          data-module="hashGenerator"
+        >
+          <span class="nav-icon">🔐</span>
+          <span class="nav-label">Hash Generator</span>
+        </button>
+
+        <button
+          class="nav-item"
+          data-module="emlAnalyzer"
+        >
+          <span class="nav-icon">📧</span>
+          <span class="nav-label">EML Analyzer</span>
+        </button>
+
+        <button
+          class="nav-item"
+          data-module="settings"
+        >
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">Settings</span>
         </button>
       </nav>
 
@@ -76,12 +107,13 @@
     <!-- Main content -->
     <main class="main">
       <header class="main-header">
-        <div class="main-header-text">
+        <div>
           <h1 id="moduleTitle">CSV / Spreadsheet Workbench</h1>
           <p id="moduleSubtitle" class="main-subtitle">
-            Load, clean, and export CSV data. All processing happens locally.
+            Load, clean, and export campaign and PB Tools CSV data. All processing happens locally.
           </p>
         </div>
+
         <div class="main-actions">
           <span class="status-dot status-ok"></span>
           <span class="status-label">Ready</span>
@@ -89,21 +121,28 @@
       </header>
 
       <section id="moduleContainer" class="module-container">
-        <!-- Active module renders here -->
+        <!-- The active module will render its UI here -->
       </section>
     </main>
-
   </div>
 
-  <!-- Export modal -->
+  <!-- Export modal (for CSV Workbench) -->
   <div id="exportModalBackdrop" class="modal-backdrop hidden">
     <div class="modal">
       <div class="modal-header">
         <div>
           <div class="modal-title">Export data</div>
-          <div class="modal-subtitle">Choose what to export and in which format.</div>
+          <div class="modal-subtitle">
+            Choose what to export and in which format.
+          </div>
         </div>
-        <button class="modal-close" id="exportModalCloseBtn" aria-label="Close">×</button>
+        <button
+          class="modal-close"
+          id="exportModalCloseBtn"
+          aria-label="Close export dialog"
+        >
+          ×
+        </button>
       </div>
 
       <div class="modal-body">
@@ -113,21 +152,19 @@
             <input type="radio" name="exportFormat" value="csv" checked>
             <div class="export-format-content">
               <div class="export-format-title">CSV</div>
-              <div class="export-format-subtitle">Download as CSV for Excel or other tools.</div>
+              <div class="export-format-subtitle">
+                Download as CSV for Excel or other tools.
+              </div>
             </div>
           </label>
+
           <label class="export-format-card">
             <input type="radio" name="exportFormat" value="xlsx">
             <div class="export-format-content">
               <div class="export-format-title">XLSX</div>
-              <div class="export-format-subtitle">Excel workbook.</div>
-            </div>
-          </label>
-          <label class="export-format-card">
-            <input type="radio" name="exportFormat" value="html">
-            <div class="export-format-content">
-              <div class="export-format-title">HTML</div>
-              <div class="export-format-subtitle">Styled table, opens in browser, print to PDF.</div>
+              <div class="export-format-subtitle">
+                Excel workbook.
+              </div>
             </div>
           </label>
         </div>
@@ -138,22 +175,31 @@
             <input type="radio" name="exportDataset" value="main" checked>
             <div class="export-format-content">
               <div class="export-format-title">Main data</div>
-              <div class="export-format-subtitle">Current table with visible columns and annotations.</div>
+              <div class="export-format-subtitle">
+                Current table with visible columns and annotations.
+              </div>
             </div>
           </label>
+
           <label class="export-dataset-card" id="exportSummaryOption">
             <input type="radio" name="exportDataset" value="summary">
             <div class="export-format-content">
               <div class="export-format-title">Summary</div>
-              <div class="export-format-subtitle">Latest group &amp; count results (if available).</div>
+              <div class="export-format-subtitle">
+                Latest group &amp; count results (if available).
+              </div>
             </div>
           </label>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="exportCancelButton">Cancel</button>
-        <button class="btn" id="exportConfirmButton">Export</button>
+        <button class="btn btn-secondary" id="exportCancelButton">
+          Cancel
+        </button>
+        <button class="btn" id="exportConfirmButton">
+          Export
+        </button>
       </div>
     </div>
   </div>
@@ -166,7 +212,10 @@
   <!-- Core app + modules -->
   <script src="app.js"></script>
   <script src="modules/csvWorkbench.js"></script>
-  <script src="modules/reportBuilder.js"></script>
+  <script src="modules/reportBuilder.js"></script> 
+  <script src="modules/emailTemplater.js"></script>
+  <script src="modules/hashGenerator.js"></script>
+  <script src="modules/emlAnalyzer.js"></script>
   <script src="modules/settings.js"></script>
 </body>
 </html>
