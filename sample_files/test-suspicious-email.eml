@@ -1,0 +1,33 @@
+From: security@paypal-verify.com
+To: victim@company.com
+Subject: Urgent: Verify Your Account
+Date: Mon, 24 Feb 2026 14:32:13 -0500
+Message-ID: <abc123@malicious-server.net>
+Return-Path: <attacker@bad-domain.xyz>
+Received: from mail-server-4.company.local (mail-server-4.company.local [192.168.1.4])
+	by exchange.company.local with ESMTP id ABC123;
+	Mon, 24 Feb 2026 14:35:18 -0500
+Received: from mail-server-3.company.local (mail-server-3.company.local [192.168.1.3])
+	by mail-server-4.company.local with ESMTP id XYZ789;
+	Mon, 24 Feb 2026 14:35:15 -0500
+Received: from mail-server-2.company.local (mail-server-2.company.local [192.168.1.2])
+	by mail-server-3.company.local with ESMTP id DEF456;
+	Mon, 24 Feb 2026 14:35:12 -0500
+Received: from suspicious-sender.badactor.com (suspicious-sender.badactor.com [45.123.45.67])
+	by mail-server-2.company.local with ESMTP id GHI789;
+	Mon, 24 Feb 2026 14:32:13 -0500
+Received-SPF: fail (mail-server-2.company.local: domain of attacker@bad-domain.xyz does not designate 45.123.45.67 as permitted sender)
+Authentication-Results: mail-server-2.company.local;
+	dkim=fail reason="signature verification failed";
+	dmarc=fail (p=REJECT dis=NONE) header.from=paypal-verify.com
+
+Dear Customer,
+
+We have detected suspicious activity on your account. Please verify your identity immediately by clicking the link below:
+
+http://45.123.45.67/paypal-login.php
+
+Failure to verify within 24 hours will result in account suspension.
+
+Best regards,
+PayPal Security Team

@@ -1,0 +1,20 @@
+Email,First Name,Last Name,Job Title,Group,Manager Name,Manager Email,Location,Employee Number,Content,Department,Custom Field 1,Campaign,Result
+user1@example.com,Alice,Smith,Analyst,Finance,Jane Manager,manager1@example.com,IN,1001,"Clicked on simulated phish",Finance,2101 Centerstone of Indiana, Inc,Wave 1,Failed
+user2@example.com,Bob,Johnson,HR Generalist,HR,Jane Manager,manager1@example.com,TN,1002,"Reported simulation email",HR,2101 Centerstone of Indiana, Inc,Wave 1,Passed
+user3@example.com,Carol,Williams,Sales Rep,Sales,John Leader,manager2@example.com,IL,1003,"Ignored simulation email",Sales,2101 Centerstone of Indiana, Inc,Wave 2,Passed
+user4@example.com,David,Brown,Sysadmin,IT,John Leader,manager2@example.com,FL,1004,"Clicked link and entered creds",IT,2101 Centerstone of Indiana, Inc,Wave 2,Failed
+user5@example.com,Eva,Davis,Engineer,Engineering,Pat Director,manager3@example.com,IN,1005,"Opened but did not click",Engineering,2101 Centerstone of Indiana, Inc,Wave 3,Passed
+user6@example.com,Frank,Miller,Analyst,Finance,Pat Director,manager3@example.com,TN,1006,"Clicked on simulated phish",Finance,2101 Centerstone of Indiana, Inc,Wave 3,Failed
+user7@example.com,Grace,Wilson,HR Generalist,HR,Jane Manager,manager1@example.com,IL,1007,"Reported simulation email",HR,2101 Centerstone of Indiana, Inc,Wave 4,Passed
+user8@example.com,Henry,Moore,Sales Rep,Sales,John Leader,manager2@example.com,FL,1008,"Clicked on simulated phish",Sales,2101 Centerstone of Indiana, Inc,Wave 4,Failed
+user9@example.com,Ian,Taylor,Sysadmin,IT,John Leader,manager2@example.com,IN,1009,"Ignored simulation email",IT,2101 Centerstone of Indiana, Inc,Wave 1,Passed
+user10@example.com,Judy,Anderson,Engineer,Engineering,Pat Director,manager3@example.com,TN,1010,"Clicked on simulated phish",Engineering,2101 Centerstone of Indiana, Inc,Wave 2,Failed
+user11@example.com,Karl,Thomas,Analyst,Finance,Jane Manager,manager1@example.com,IL,1011,"Reported simulation email",Finance,2101 Centerstone of Indiana, Inc,Wave 3,Passed
+user12@example.com,Laura,Jackson,HR Generalist,HR,Jane Manager,manager1@example.com,FL,1012,"Clicked on simulated phish",HR,2101 Centerstone of Indiana, Inc,Wave 4,Failed
+user13@example.com,Mike,White,Sales Rep,Sales,John Leader,manager2@example.com,IN,1013,"Ignored simulation email",Sales,2101 Centerstone of Indiana, Inc,Wave 2,Passed
+user14@example.com,Nina,Harris,Sysadmin,IT,John Leader,manager2@example.com,TN,1014,"Reported simulation email",IT,2101 Centerstone of Indiana, Inc,Wave 3,Passed
+user15@example.com,Oscar,Martin,Engineer,Engineering,Pat Director,manager3@example.com,IL,1015,"Clicked on simulated phish",Engineering,2101 Centerstone of Indiana, Inc,Wave 4,Failed
+user16@example.com,Paula,Lee,Analyst,Finance,Pat Director,manager3@example.com,FL,1016,"Opened but did not click",Finance,2101 Centerstone of Indiana, Inc,Wave 1,Passed
+user17@example.com,Quinn,Walker,HR Generalist,HR,Jane Manager,manager1@example.com,IN,1017,"Clicked on simulated phish",HR,2101 Centerstone of Indiana, Inc,Wave 2,Failed
+user18@example.com,Ruth,Young,Sales Rep,Sales,John Leader,manager2@example.com,TN,1018,"Reported simulation email",Sales,2101 Centerstone of Indiana, Inc,Wave 3,Passed
+user19@example.com,Sam,King,Sysadmin,IT,John Leader,manager2@example.com,IL,1019,"Clicked on simulated phish",IT,2101 Centerstone of Indiana, Inc,Wave 4,Failed

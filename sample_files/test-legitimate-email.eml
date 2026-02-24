@@ -1,0 +1,29 @@
+From: notifications@github.com
+To: developer@company.com
+Subject: [GitHub] New pull request in your repository
+Date: Mon, 24 Feb 2026 10:15:22 -0800
+Message-ID: <pr-12345@github.com>
+Return-Path: <noreply@github.com>
+Received: from mail.company.com (mail.company.com [10.0.1.50])
+	by exchange.company.local with ESMTPS id PR12345;
+	Mon, 24 Feb 2026 13:15:45 -0500
+Received: from github-smtp-2a-mta-201.iad.github.net (github-smtp-2a-mta-201.iad.github.net [140.82.112.201])
+	by mail.company.com with ESMTPS id GH789;
+	Mon, 24 Feb 2026 10:15:22 -0800
+Received-SPF: pass (mail.company.com: domain of noreply@github.com designates 140.82.112.201 as permitted sender)
+Authentication-Results: mail.company.com;
+	dkim=pass header.d=github.com header.s=pf2023 header.b=abc123;
+	dmarc=pass (p=QUARANTINE dis=NONE) header.from=github.com
+
+Hi Developer,
+
+A new pull request has been opened in your repository:
+
+Repository: company/awesome-project
+Title: Fix authentication bug in login module
+Author: alice.developer
+
+View pull request: https://github.com/company/awesome-project/pull/123
+
+Best regards,
+GitHub Team

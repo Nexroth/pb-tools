@@ -1,0 +1,59 @@
+Return-Path: <john.doe@pbtools.local>
+Received: from exchange.pbtools.local (exchange.pbtools.local [192.168.1.105])
+	by mail-server-4.pbtools.local (Postfix) with ESMTP id 9F8B3140056
+	for <security-team@pbtools.local>; Mon, 24 Feb 2026 15:45:22 -0500 (EST)
+Received: from mail-server-3.pbtools.local (mail-server-3.pbtools.local [192.168.1.103])
+	by exchange.pbtools.local (Postfix) with ESMTP id 5F3A2120045
+	for <john.doe@pbtools.local>; Mon, 24 Feb 2026 14:32:15 -0500 (EST)
+Received: from mail-server-2.pbtools.local (mail-server-2.pbtools.local [192.168.1.102])
+	by mail-server-3.pbtools.local (Postfix) with ESMTPS id 3B9E1A0023
+	for <john.doe@pbtools.local>; Mon, 24 Feb 2026 14:32:14 -0500 (EST)
+Received: from suspicious-sender.badactor.com ([45.123.45.67])
+	by mail-server-2.pbtools.local with SMTP id XY98ZA76BC54.32109
+	for <john.doe@pbtools.local>; Mon, 24 Feb 2026 14:32:13 -0500
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+	d=badactor.com; s=default; t=1740423133;
+	bh=abc123def456ghi789jkl012mno345pqr678stu901vwx234=;
+	h=From:To:Subject:Date:Message-ID;
+	b=InvalidSignatureDataHereThisWouldNormallyBeALongBase64String
+Authentication-Results: mail-server-3.pbtools.local;
+	dkim=fail header.d=badactor.com header.s=default header.b=InvalidSi;
+	spf=fail (mail-server-3.pbtools.local: domain of phisher@badactor.com
+	does not designate 45.123.45.67 as permitted sender) smtp.mailfrom=phisher@badactor.com;
+	dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=badactor.com
+Received-SPF: fail (mail-server-3.pbtools.local: domain of phisher@badactor.com
+	does not designate 45.123.45.67 as permitted sender) client-ip=45.123.45.67;
+	envelope-from=phisher@badactor.com;
+	helo=suspicious-sender.badactor.com;
+From: "Your Bank" <phisher@badactor.com>
+To: John Doe <john.doe@pbtools.local>
+Subject: URGENT: Verify Your Account Now
+Date: Mon, 24 Feb 2026 14:32:10 -0500
+Message-ID: <fake123456@suspicious-sender.badactor.com>
+Reply-To: scammer@different-domain.ru
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+X-Mailer: MassMailer Pro 3.0
+X-Priority: 1 (Highest)
+X-Spam-Score: 8.5
+X-Spam-Status: Yes
+
+Dear Customer,
+
+Your account has been compromised. Click here immediately to verify:
+http://phishing-site.badactor.com/verify
+
+This is a FORWARDED phishing email for testing the EML Analyzer.
+
+Original suspicious email was sent to john.doe@pbtools.local,
+who then forwarded it to security-team@pbtools.local for analysis.
+
+The analyzer should:
+- Show 4 hops total
+- Identify the ORIGINAL sender hop (from badactor.com)
+- Detect SPF fail, DKIM fail, DMARC fail
+- Show verdict: LIKELY SPOOFING
+- Note that email was forwarded (4 hops)
+
+DO NOT click any links in this test email.

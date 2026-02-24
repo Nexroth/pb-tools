@@ -1,0 +1,64 @@
+Return-Path: <security-team@pbtools.local>
+Received: from mail-server-3.pbtools.local (mail-server-3.pbtools.local [192.168.1.103])
+	by exchange.pbtools.local (Postfix) with ESMTP id 5F3A2120045
+	for <john.doe@pbtools.local>; Mon, 24 Feb 2026 14:32:15 -0500 (EST)
+Received: from mail-server-2.pbtools.local (mail-server-2.pbtools.local [192.168.1.102])
+	by mail-server-3.pbtools.local (Postfix) with ESMTPS id 3B9E1A0023
+	for <john.doe@pbtools.local>; Mon, 24 Feb 2026 14:32:14 -0500 (EST)
+Received: from mail-server-1.pbtools.local ([192.168.1.101])
+	by mail-server-2.pbtools.local with ESMTP id AB12CD34EF56.78901
+	for <john.doe@pbtools.local>; Mon, 24 Feb 2026 14:32:13 -0500
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+	d=pbtools.local; s=default; t=1740423133;
+	bh=frcCV1k9oG9oKj3dpUqdJg1PxRT2RSN/XKdLi+Cy+Cs=;
+	h=From:To:Subject:Date:Message-ID;
+	b=KLMnOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUv
+	WxYzAbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz
+Authentication-Results: mail-server-3.pbtools.local;
+	dkim=pass header.d=pbtools.local header.s=default header.b=KLMnOpQr;
+	spf=pass (mail-server-3.pbtools.local: domain of security-team@pbtools.local
+	designates 192.168.1.101 as permitted sender) smtp.mailfrom=security-team@pbtools.local;
+	dmarc=pass (p=QUARANTINE sp=QUARANTINE dis=NONE) header.from=pbtools.local
+Received-SPF: pass (mail-server-3.pbtools.local: domain of security-team@pbtools.local
+	designates 192.168.1.101 as permitted sender) client-ip=192.168.1.101;
+	envelope-from=security-team@pbtools.local;
+	helo=mail-server-1.pbtools.local;
+From: Security Team <security-team@pbtools.local>
+To: John Doe <john.doe@pbtools.local>
+Subject: Security Alert - PhishER Campaign Results
+Date: Mon, 24 Feb 2026 14:32:10 -0500
+Message-ID: <20260224193210.ABC123.security-team@pbtools.local>
+Reply-To: security-alerts@pbtools.local
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+X-Mailer: PB Tools Email Templater v0.2.0
+X-Priority: 3 (Normal)
+X-Spam-Score: 0.0
+X-Spam-Status: No
+
+Hi John,
+
+This is a test email for the EML Analyzer module.
+
+Recent PhishER campaign results show that you successfully identified
+the simulated phishing attempt sent on February 20, 2026.
+
+Great work on staying vigilant!
+
+Key Details:
+- Campaign: Q1 2026 Finance Phishing Test
+- Incident ID: INC-2026-001234
+- Date Received: February 20, 2026 at 9:15 AM
+- Status: Reported Correctly
+
+Please continue to report suspicious emails using the PhishER button
+in Outlook.
+
+Best regards,
+Security Team
+PB Tools Security Operations
+
+---
+This email was sent from an automated system. Do not reply directly to this email.
+For questions, contact: security-team@pbtools.local

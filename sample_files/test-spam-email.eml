@@ -1,0 +1,41 @@
+From: winner@lottery-notification.xyz
+To: lucky.person@company.com
+Subject: Congratulations! You Won $10,000,000
+Date: Mon, 24 Feb 2026 03:45:12 +0000
+Message-ID: <win123@spam-server.tk>
+Return-Path: <bounce@lottery-notification.xyz>
+X-Spam-Score: 8.5
+X-Spam-Level: ********
+X-Spam-Status: Yes, score=8.5 required=5.0
+X-Originating-IP: [103.45.67.89]
+X-Mailer: PHPMailer 5.2
+X-Priority: 1
+X-MSMail-Priority: High
+X-Virus-Scanned: ClamAV version 0.103.8
+Received: from mail.company.com (mail.company.com [10.0.1.50])
+	by exchange.company.local with ESMTP id SPAM123;
+	Mon, 24 Feb 2026 03:45:25 -0500
+Received: from spam-relay.tk (spam-relay.tk [103.45.67.89])
+	by mail.company.com with ESMTP id RELAY789;
+	Mon, 24 Feb 2026 03:45:12 +0000
+Received-SPF: fail (mail.company.com: domain of bounce@lottery-notification.xyz does not designate 103.45.67.89 as permitted sender)
+Authentication-Results: mail.company.com;
+	dkim=fail reason="no signature";
+	dmarc=fail (p=REJECT dis=NONE) header.from=lottery-notification.xyz
+
+CONGRATULATIONS!!!
+
+You have been selected as the GRAND PRIZE WINNER of our International Lottery!
+
+Prize Amount: $10,000,000 USD
+
+To claim your prize, click here immediately: http://103.45.67.89/claim-prize.php
+
+Or use this backup link: https://bit.ly/claim-lottery-prize
+
+You must claim within 24 hours or the prize will be forfeited!
+
+Send your personal information to: claims@lottery-notification.xyz
+
+Best regards,
+International Lottery Commission

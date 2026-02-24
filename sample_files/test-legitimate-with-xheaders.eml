@@ -1,0 +1,42 @@
+From: newsletter@techcompany.com
+To: subscriber@company.com
+Subject: Weekly Tech Newsletter - February 2026
+Date: Mon, 24 Feb 2026 08:00:00 -0800
+Message-ID: <newsletter-feb24@techcompany.com>
+Return-Path: <noreply@techcompany.com>
+X-Spam-Score: 0.2
+X-Spam-Level: 
+X-Spam-Status: No, score=0.2 required=5.0
+X-Originating-IP: [199.47.217.144]
+X-Mailer: SendGrid (v7.4.3)
+X-Priority: 3
+X-MSMail-Priority: Normal
+X-Virus-Scanned: ClamAV version 0.103.8, no virus detected
+X-SG-EID: d2VsbCBkb25lISBZb3UgZGVjb2RlZCB0aGlzIQ==
+X-SG-ID: 1234567890
+Received: from mail.company.com (mail.company.com [10.0.1.50])
+	by exchange.company.local with ESMTPS id NEWS456;
+	Mon, 24 Feb 2026 11:00:15 -0500
+Received: from sendgrid.net (o1.email.techcompany.com [199.47.217.144])
+	by mail.company.com with ESMTPS id TECH789;
+	Mon, 24 Feb 2026 08:00:00 -0800
+Received-SPF: pass (mail.company.com: domain of noreply@techcompany.com designates 199.47.217.144 as permitted sender)
+Authentication-Results: mail.company.com;
+	dkim=pass header.d=techcompany.com header.s=smtpapi;
+	dmarc=pass (p=QUARANTINE dis=NONE) header.from=techcompany.com
+
+Hi there,
+
+Welcome to this week's tech newsletter featuring the latest industry news and updates.
+
+Featured Articles:
+- New AI developments in healthcare
+- Cloud security best practices
+- Software engineering trends for 2026
+
+Read more at: https://techcompany.com/newsletter/feb-24-2026
+
+To unsubscribe: https://techcompany.com/unsubscribe
+
+Best regards,
+TechCompany Newsletter Team
