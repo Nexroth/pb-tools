@@ -70,7 +70,7 @@
     `;
 
     wrapper.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:1rem;padding-right:1rem;padding-bottom:0.5rem;">
+      <div style="display:flex;flex-direction:column;gap:1rem;padding-left:1.2rem;padding-right:1rem;padding-bottom:0.5rem;">
         <!-- CSV Upload Section -->
         <div style="
           background:#020617;
@@ -173,10 +173,15 @@ Security Team"
                 resize:vertical;
               "
             ></textarea>
+            <div style="margin-top:0.5rem;">
+              <button class="btn btn-secondary" id="emailInsertTableBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;">
+                Insert Table Template
+              </button>
+            </div>
           </div>
 
           <div style="margin-top:0.5rem;font-size:0.7rem;color:#6b7280;">
-            💡 Use {{FieldName}} to insert variables. Field names are case-sensitive.
+            💡 Use {{FieldName}} to insert variables. Field names are case-sensitive. Tables are supported for professional formatting.
           </div>
         </div>
 
@@ -249,8 +254,11 @@ Security Team"
           </div>
           
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-            <button class="btn" id="emailOpenClientBtn" disabled>
+            <button class="btn" id="emailOpenClientBtn" disabled title="Opens mailto: link (text only, no HTML)">
               Open in Email Client
+            </button>
+            <button class="btn" id="emailCopyHtmlBtn" disabled>
+              Copy as HTML
             </button>
             <button class="btn btn-secondary" id="emailExportAllBtn" disabled>
               Export All as Text Files
@@ -264,7 +272,7 @@ Security Team"
           </div>
           
           <div style="margin-top:0.5rem;font-size:0.7rem;color:#6b7280;">
-            Export options available after loading CSV and creating template
+            💡 "Open in Email Client" sends text only. For HTML tables, use "Copy as HTML" then paste into Outlook/Gmail.
           </div>
         </div>
       </div>
@@ -321,6 +329,51 @@ Security Team"
       });
     }
 
+    // Insert Table Template button
+    const insertTableBtn = rootEl.querySelector("#emailInsertTableBtn");
+    if (insertTableBtn) {
+      insertTableBtn.addEventListener("click", () => {
+        const bodyTextarea = rootEl.querySelector("#emailBodyInput");
+        if (!bodyTextarea) return;
+        
+        const tableTemplate = `
+<table border="1" style="border-collapse:collapse;width:100%;margin:1rem 0;border:1px solid #cbd5e0;">
+  <thead>
+    <tr style="background:#4a5568;color:#ffffff;">
+      <th style="padding:10px;text-align:left;border:1px solid #cbd5e0;">Column 1</th>
+      <th style="padding:10px;text-align:left;border:1px solid #cbd5e0;">Column 2</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="background:#ffffff;color:#000000;">
+      <td style="padding:8px;border:1px solid #cbd5e0;">{{Variable1}}</td>
+      <td style="padding:8px;border:1px solid #cbd5e0;">{{Variable2}}</td>
+    </tr>
+    <tr style="background:#f7fafc;color:#000000;">
+      <td style="padding:8px;border:1px solid #cbd5e0;">{{Variable3}}</td>
+      <td style="padding:8px;border:1px solid #cbd5e0;">{{Variable4}}</td>
+    </tr>
+  </tbody>
+</table>`;
+        
+        // Insert at cursor position
+        const pos = bodyTextarea.selectionStart || 0;
+        const before = bodyTextarea.value.substring(0, pos);
+        const after = bodyTextarea.value.substring(pos);
+        bodyTextarea.value = before + tableTemplate + after;
+        
+        // Update template and preview
+        currentTemplate.body = bodyTextarea.value;
+        updateQuickFillInputs();
+        updatePreview();
+        updateExportButtons();
+        
+        // Move cursor to end of inserted text
+        bodyTextarea.focus();
+        bodyTextarea.setSelectionRange(pos + tableTemplate.length, pos + tableTemplate.length);
+      });
+    }
+
     // Preview navigation
     const prevBtn = rootEl.querySelector("#emailPreviewPrev");
     const nextBtn = rootEl.querySelector("#emailPreviewNext");
@@ -361,6 +414,7 @@ Security Team"
 
     // Export buttons
     const openClientBtn = rootEl.querySelector("#emailOpenClientBtn");
+    const copyHtmlBtn = rootEl.querySelector("#emailCopyHtmlBtn");
     const exportAllBtn = rootEl.querySelector("#emailExportAllBtn");
     const copyAllBtn = rootEl.querySelector("#emailCopyAllBtn");
     const exportCsvBtn = rootEl.querySelector("#emailExportCsvBtn");
@@ -368,6 +422,12 @@ Security Team"
     if (openClientBtn) {
       openClientBtn.addEventListener("click", () => {
         openInEmailClient();
+      });
+    }
+
+    if (copyHtmlBtn) {
+      copyHtmlBtn.addEventListener("click", () => {
+        copyAsHtml();
       });
     }
 
@@ -602,11 +662,11 @@ Security Team"
             <div style="
               font-size:0.85rem;
               color:#e5e7eb;
-              white-space:pre-wrap;
+              ${containsHtmlTable(mergedBody) ? '' : 'white-space:pre-wrap;'}
               font-family:system-ui,sans-serif;
               line-height:1.5;
             ">
-              ${escapeHtml(mergedBody || "(No body)")}
+              ${containsHtmlTable(mergedBody) ? sanitizeHtml(mergedBody.replace(/\n/g, '<br>')) : escapeHtml(mergedBody || "(No body)")}
             </div>
           </div>
         </div>
@@ -650,11 +710,11 @@ Security Team"
             <div style="
               font-size:0.85rem;
               color:#e5e7eb;
-              white-space:pre-wrap;
+              ${containsHtmlTable(mergedBody) ? '' : 'white-space:pre-wrap;'}
               font-family:system-ui,sans-serif;
               line-height:1.5;
             ">
-              ${escapeHtml(mergedBody || "(No body)")}
+              ${containsHtmlTable(mergedBody) ? sanitizeHtml(mergedBody.replace(/\n/g, '<br>')) : escapeHtml(mergedBody || "(No body)")}
             </div>
           </div>
         </div>
@@ -677,8 +737,59 @@ Security Team"
     return merged;
   }
 
+  function containsHtmlTable(text) {
+    if (!text) return false;
+    return /<table[\s>]/i.test(text);
+  }
+
+  function sanitizeHtml(html) {
+    if (!html) return html;
+    
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    
+    // Remove dangerous elements
+    const dangerous = temp.querySelectorAll('script, iframe, object, embed');
+    dangerous.forEach(el => el.remove());
+    
+    // Remove event handlers and dangerous attributes
+    const allElements = temp.querySelectorAll('*');
+    allElements.forEach(el => {
+      Array.from(el.attributes).forEach(attr => {
+        // Remove event handlers
+        if (attr.name.startsWith('on')) {
+          el.removeAttribute(attr.name);
+        }
+      });
+      
+      // Remove dangerous href/src
+      if (el.hasAttribute('href')) {
+        const href = el.getAttribute('href').toLowerCase();
+        if (href.startsWith('javascript:') || href.startsWith('data:')) {
+          el.removeAttribute('href');
+        }
+      }
+      if (el.hasAttribute('src')) {
+        const src = el.getAttribute('src').toLowerCase();
+        if (src.startsWith('javascript:') || src.startsWith('data:')) {
+          el.removeAttribute('src');
+        }
+      }
+    });
+    
+    return temp.innerHTML;
+  }
+
+  function stripHtml(html) {
+    if (!html) return html;
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    return temp.textContent || temp.innerText || '';
+  }
+
   function updateExportButtons() {
     const openClientBtn = rootEl.querySelector("#emailOpenClientBtn");
+    const copyHtmlBtn = rootEl.querySelector("#emailCopyHtmlBtn");
     const exportAllBtn = rootEl.querySelector("#emailExportAllBtn");
     const copyAllBtn = rootEl.querySelector("#emailCopyAllBtn");
     const exportCsvBtn = rootEl.querySelector("#emailExportCsvBtn");
@@ -690,6 +801,7 @@ Security Team"
     const canOpenClient = hasQuickFill; // Only for Quick Fill (single email)
 
     if (openClientBtn) openClientBtn.disabled = !canOpenClient;
+    if (copyHtmlBtn) copyHtmlBtn.disabled = !canOpenClient; // Same as Open in Email Client (Quick Fill only)
     if (exportAllBtn) exportAllBtn.disabled = !canExport;
     if (copyAllBtn) copyAllBtn.disabled = !canExport;
     if (exportCsvBtn) exportCsvBtn.disabled = !hasCsvData; // CSV export only works with CSV data
@@ -751,7 +863,12 @@ Security Team"
     if (!quickFillValues || Object.keys(quickFillValues).length === 0) return;
 
     const mergedSubject = mergeTemplate(currentTemplate.subject, quickFillValues);
-    const mergedBody = mergeTemplate(currentTemplate.body, quickFillValues);
+    let mergedBody = mergeTemplate(currentTemplate.body, quickFillValues);
+
+    // Strip HTML tables for mailto: (email clients don't support HTML in mailto: links)
+    if (containsHtmlTable(mergedBody)) {
+      mergedBody = stripHtml(mergedBody);
+    }
 
     // URL encode the subject and body for mailto: link
     const subject = encodeURIComponent(mergedSubject || "");
@@ -767,6 +884,87 @@ Security Team"
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  }
+
+  function copyAsHtml() {
+    // Only works in Quick Fill mode (single recipient)
+    if (!quickFillValues || Object.keys(quickFillValues).length === 0) return;
+
+    const mergedSubject = mergeTemplate(currentTemplate.subject, quickFillValues);
+    const mergedBody = mergeTemplate(currentTemplate.body, quickFillValues);
+
+    // Build HTML email structure
+    // Convert newlines to <br> tags, then sanitize if HTML is present
+    let bodyHtml = mergedBody;
+    if (containsHtmlTable(bodyHtml)) {
+      // Replace newlines with <br>, then sanitize the HTML
+      bodyHtml = bodyHtml.replace(/\n/g, '<br>');
+      bodyHtml = sanitizeHtml(bodyHtml);
+    } else {
+      // Plain text: escape and convert newlines
+      bodyHtml = escapeHtml(bodyHtml).replace(/\n/g, '<br>');
+    }
+
+    const htmlEmail = `
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(mergedSubject)}</title>
+</head>
+<body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;color:#000000;">
+  ${bodyHtml}
+</body>
+</html>`.trim();
+
+    // Copy to clipboard using modern Clipboard API
+    if (navigator.clipboard && navigator.clipboard.write) {
+      // Create ClipboardItem with HTML
+      const blob = new Blob([htmlEmail], { type: 'text/html' });
+      const clipboardItem = new ClipboardItem({ 'text/html': blob });
+      
+      navigator.clipboard.write([clipboardItem])
+        .then(() => {
+          alert('HTML email copied to clipboard!\n\nNow paste (Ctrl+V) into your email client compose window.');
+        })
+        .catch(err => {
+          console.error('Clipboard write failed:', err);
+          // Fallback
+          copyHtmlFallback(htmlEmail);
+        });
+    } else {
+      // Fallback for older browsers
+      copyHtmlFallback(htmlEmail);
+    }
+  }
+
+  function copyHtmlFallback(htmlEmail) {
+    // Create a temporary contenteditable div
+    const tempDiv = document.createElement('div');
+    tempDiv.contentEditable = 'true';
+    tempDiv.innerHTML = htmlEmail;
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = '-9999px';
+    document.body.appendChild(tempDiv);
+
+    // Select the content
+    const range = document.createRange();
+    range.selectNodeContents(tempDiv);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    // Try to copy
+    try {
+      document.execCommand('copy');
+      alert('HTML email copied to clipboard!\n\nNow paste (Ctrl+V) into your email client compose window.');
+    } catch (err) {
+      console.error('Copy failed:', err);
+      alert('Copy failed. Please try a different browser or use "Export All as Text Files".');
+    }
+
+    // Cleanup
+    document.body.removeChild(tempDiv);
+    selection.removeAllRanges();
   }
 
   function exportAllAsTextFiles() {

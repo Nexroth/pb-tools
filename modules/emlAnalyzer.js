@@ -312,16 +312,24 @@
     const headersText = headerEnd > 0 ? content.substring(0, headerEnd) : content;
     
     // Parse headers into key-value pairs
+    // Special handling for headers that can appear multiple times (like Received)
     parsedHeaders = {};
+    const receivedHeaders = []; // Store all Received headers separately
+    
     const lines = headersText.split("\n");
     let currentHeader = "";
     let currentValue = "";
 
     lines.forEach(line => {
       if (line.match(/^[A-Za-z-]+:/)) {
-        // New header
+        // New header - save previous one first
         if (currentHeader) {
-          parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
+          const headerLower = currentHeader.toLowerCase();
+          if (headerLower === "received") {
+            receivedHeaders.push(currentValue.trim());
+          } else {
+            parsedHeaders[headerLower] = currentValue.trim();
+          }
         }
         const colonIndex = line.indexOf(":");
         currentHeader = line.substring(0, colonIndex).trim();
@@ -334,8 +342,16 @@
     
     // Don't forget the last header
     if (currentHeader) {
-      parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
+      const headerLower = currentHeader.toLowerCase();
+      if (headerLower === "received") {
+        receivedHeaders.push(currentValue.trim());
+      } else {
+        parsedHeaders[headerLower] = currentValue.trim();
+      }
     }
+    
+    // Store all Received headers in parsedHeaders
+    parsedHeaders.receivedHeaders = receivedHeaders;
 
     // Update file info
     const fileInfo = rootEl.querySelector("#emlFileInfo");
@@ -387,6 +403,10 @@
   function renderAnalysis() {
     const container = rootEl.querySelector("#emlAnalysis");
     if (!container) return;
+
+    // Check if this appears to be a forwarded email
+    const receivedCount = (parsedHeaders.receivedHeaders || []).length;
+    const isForwarded = receivedCount > 2; // More than 2 hops suggests forwarding
 
     // Automated analysis logic
     const issues = [];
@@ -459,8 +479,13 @@
       }
     }
 
+    // Add forwarding note
+    if (isForwarded) {
+      issues.push(`ℹ️ Email has ${receivedCount} hops (likely forwarded/reported)`);
+    }
+
     // If no issues found, add a positive note
-    if (issues.length === 0) {
+    if (issues.length === 0 || (issues.length === 1 && isForwarded)) {
       issues.push("✅ No authentication issues detected");
       issues.push("✅ All available checks passed");
     }
@@ -493,7 +518,7 @@
       </div>
 
       <div style="font-size:0.7rem;color:#6b7280;font-style:italic;">
-        Note: This is automated analysis based on email headers only. Manual review is recommended for important decisions.
+        Note: This is automated analysis based on email headers only. ${isForwarded ? 'For forwarded emails, check the "Original Sender" hop in Routing Path below. ' : ''}Manual review is recommended for important decisions.
       </div>
     `;
   }
@@ -575,25 +600,23 @@
     }
 
     // Get all Received headers
-    const receivedHeaders = [];
-    Object.keys(parsedHeaders).forEach(key => {
-      if (key === "received") {
-        receivedHeaders.push(parsedHeaders[key]);
-      }
-    });
-
-    // Also check for numbered received headers (received-1, received-2, etc)
-    // In reality, the parser should handle multiple "Received" headers
-    // For now, we'll show what we have
+    const receivedHeaders = parsedHeaders.receivedHeaders || [];
 
     if (receivedHeaders.length === 0) {
       container.innerHTML = `<div style="color:#9ca3af;">No routing information found</div>`;
       return;
     }
 
-    const hopsToShow = showingAllHops ? receivedHeaders : [receivedHeaders[0]];
+    // Received headers are in reverse chronological order (newest first)
+    // The LAST one is the original sender (most important for phishing analysis)
+    const hopsToShow = showingAllHops ? receivedHeaders : [receivedHeaders[receivedHeaders.length - 1]];
 
-    container.innerHTML = hopsToShow.map((hop, index) => `
+    container.innerHTML = hopsToShow.map((hop, index) => {
+      // When showing all, reverse the display order so original sender is at top
+      const displayIndex = showingAllHops ? (receivedHeaders.length - index) : 1;
+      const isOriginal = displayIndex === receivedHeaders.length;
+      
+      return `
       <div style="
         background:rgba(15,23,42,0.9);
         border:1px solid rgba(31,41,55,0.8);
@@ -602,14 +625,14 @@
         margin-bottom:0.5rem;
         font-size:0.75rem;
       ">
-        <div style="color:#22c55e;font-weight:500;margin-bottom:0.25rem;">
-          Hop ${index + 1}
+        <div style="color:${isOriginal ? '#22c55e' : '#60a5fa'};font-weight:500;margin-bottom:0.25rem;">
+          Hop ${displayIndex}${isOriginal ? ' (Original Sender)' : ''}
         </div>
         <div style="color:#e5e7eb;white-space:pre-wrap;word-break:break-all;">
           ${escapeHtml(hop)}
         </div>
       </div>
-    `).join("");
+    `}).reverse().join("");
   }
 
   function renderRawHeaders() {
