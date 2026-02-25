@@ -14,6 +14,7 @@
   let rawHeaders = "";
   let parsedHeaders = {};
   let analysisResults = null; // Store complete analysis for export
+  let phisherInfo = null; // Store PhishER wrapper info if detected
 
   function init() {}
 
@@ -55,6 +56,9 @@
             </button>
             <button class="btn btn-secondary" id="emlExportButton" style="display:none;">
               📄 Export Report
+            </button>
+            <button class="btn btn-secondary" id="emlClearButton" style="display:none;">
+              🔄 Clear
             </button>
             <input type="file" id="emlFileInput" accept=".eml,.txt,.msg" class="hidden">
             <span id="emlFileInfo" class="info-text-sm"></span>
@@ -169,6 +173,7 @@
     const copyHeadersBtn = rootEl.querySelector("#emlCopyHeaders");
     const toggleReceivedBtn = rootEl.querySelector("#emlToggleReceived");
     const exportButton = rootEl.querySelector("#emlExportButton");
+    const clearButton = rootEl.querySelector("#emlClearButton");
 
     if (fileButton && fileInput) {
       fileButton.addEventListener("click", () => {
@@ -250,6 +255,12 @@
         exportAnalysisReport();
       });
     }
+
+    if (clearButton) {
+      clearButton.addEventListener("click", () => {
+        clearAnalysis();
+      });
+    }
   }
 
   function handleFile(file) {
@@ -271,13 +282,230 @@
     reader.readAsText(file);
   }
 
+  // Clear all analysis data and reset to initial state
+  function clearAnalysis() {
+    // Hide analysis section
+    const analysisSection = rootEl.querySelector("#emlAnalysisSection");
+    if (analysisSection) {
+      analysisSection.classList.remove("block");
+      analysisSection.classList.add("hidden");
+    }
+
+    // Hide export and clear buttons
+    const exportButton = rootEl.querySelector("#emlExportButton");
+    const clearButton = rootEl.querySelector("#emlClearButton");
+    if (exportButton) exportButton.style.display = "none";
+    if (clearButton) clearButton.style.display = "none";
+
+    // Clear file input
+    const fileInput = rootEl.querySelector("#emlFileInput");
+    if (fileInput) fileInput.value = "";
+
+    // Clear file info
+    const fileInfo = rootEl.querySelector("#emlFileInfo");
+    if (fileInfo) fileInfo.textContent = "";
+
+    // Reset all global variables
+    rawHeaders = "";
+    parsedHeaders = {};
+    analysisResults = null;
+    phisherInfo = null;
+
+    // Show dropzone again
+    const dropzone = rootEl.querySelector("#emlDropzone");
+    if (dropzone) {
+      dropzone.classList.remove("hidden");
+      dropzone.classList.add("block");
+    }
+  }
+
+  // Detect if this is a PhishER wrapper email
+  function isPhishERWrapper(content) {
+    const hasPhishAlert = content.includes('[Phish Alert]') || content.includes('[PHISH ALERT]');
+    const toPhishER = content.includes('@phisher.knowbe4.com');
+    const hasEmlAttachment = /filename=".*?\.eml"/i.test(content) || 
+                             /name=".*?\.eml"/i.test(content) ||
+                             /phish_alert.*?\.eml/i.test(content);
+    
+    // PhishER indicators: subject contains phish alert AND to phisher.knowbe4.com
+    // OR has .eml attachment (common in reported emails)
+    return (hasPhishAlert && toPhishER) || (hasEmlAttachment && toPhishER);
+  }
+
+  // Extract embedded .eml file from PhishER wrapper
+  function extractEmbeddedEmail(content) {
+    try {
+      console.log("=== EXTRACTION START ===");
+      console.log("Content length:", content.length);
+      
+      // PhishER-specific pattern: Look for "phish_alert" .eml attachment
+      // The format is always:
+      // Content-Type: application/octet-stream; name="phish_alert_*.eml"
+      // ...
+      // Content-Transfer-Encoding: base64
+      // [blank line]
+      // [base64 content]
+      // --[boundary]--
+      
+      // Find where "phish_alert" appears
+      const phishAlertPos = content.indexOf('phish_alert');
+      
+      if (phishAlertPos === -1) {
+        console.log("No phish_alert found, trying generic .eml search");
+      }
+      
+      // Find "Content-Transfer-Encoding: base64" after the .eml filename
+      const emlFilenamePos = content.indexOf('.eml"');
+      console.log(".eml filename position:", emlFilenamePos);
+      
+      if (emlFilenamePos !== -1) {
+        // Look for base64 encoding declaration after this point
+        const afterFilename = content.substring(emlFilenamePos);
+        const base64Pos = afterFilename.indexOf('Content-Transfer-Encoding: base64');
+        
+        
+        if (base64Pos !== -1) {
+          // Find the start of actual base64 content (after the blank line)
+          const afterBase64Header = afterFilename.substring(base64Pos);
+          
+          // Skip "Content-Transfer-Encoding: base64" and find the double newline
+          const doubleNewlineMatch = afterBase64Header.match(/base64\s*[\r\n]+\s*[\r\n]+/);
+          
+          if (doubleNewlineMatch) {
+            const base64Start = base64Pos + doubleNewlineMatch.index + doubleNewlineMatch[0].length;
+            const base64Section = afterFilename.substring(base64Start);
+            
+            // Find where the base64 ends (boundary marker with --)
+            const endMatch = base64Section.match(/[\r\n]--[^\r\n]+--.*/);
+            
+            if (endMatch) {
+              console.log("Found end boundary at offset:", endMatch.index);
+              const base64Raw = base64Section.substring(0, endMatch.index);
+              
+              // Clean the base64 (remove all whitespace)
+              const base64Clean = base64Raw.replace(/[\r\n\s\t]/g, '');
+              console.log("Base64 length after cleaning:", base64Clean.length);
+              
+              // Decode
+              try {
+                const decoded = atob(base64Clean);
+                console.log("=== EXTRACTION SUCCESS ===");
+                console.log("Decoded length:", decoded.length);
+                console.log("First 100 chars:", decoded.substring(0, 100));
+                return decoded;
+              } catch (decodeError) {
+                console.error("Base64 decode error:", decodeError);
+                console.log("First 200 chars of base64:", base64Clean.substring(0, 200));
+              }
+            } else {
+              console.error("Could not find end boundary");
+            }
+          } else {
+            console.error("Could not find double newline after base64 header");
+          }
+        } else {
+          console.error("Could not find Content-Transfer-Encoding: base64");
+        }
+      } else {
+        console.error("Could not find .eml filename");
+      }
+
+      console.log("=== EXTRACTION FAILED ===");
+      return null;
+    } catch (error) {
+      console.error("=== EXTRACTION ERROR ===", error);
+      return null;
+    }
+  }
+
+  // Extract PhishER reporter information
+  function extractPhishERInfo(content) {
+    const info = {
+      reporter: "",
+      reportedTo: "",
+      reportedDate: "",
+      originalSubject: ""
+    };
+
+    // Extract From (reporter)
+    const fromMatch = content.match(/^From:\s*(.+?)$/m);
+    if (fromMatch) {
+      info.reporter = fromMatch[1].trim();
+    }
+
+    // Extract To (PhishER address)
+    const toMatch = content.match(/^To:\s*(.+?)$/m);
+    if (toMatch) {
+      info.reportedTo = toMatch[1].trim();
+    }
+
+    // Extract Date
+    const dateMatch = content.match(/^Date:\s*(.+?)$/m);
+    if (dateMatch) {
+      info.reportedDate = dateMatch[1].trim();
+    }
+
+    // Extract original subject from PhishER subject line
+    const subjectMatch = content.match(/^\[Phish Alert\]\s*(.+?)$/im);
+    if (subjectMatch) {
+      info.originalSubject = subjectMatch[1].trim();
+    }
+
+    return info;
+  }
+
   function parseEmlContent(content, filename) {
     rawHeaders = content;
     
+    // Check if this is a PhishER wrapper
+    const isPhishER = isPhishERWrapper(content);
+    let actualEmailContent = content;
+    let actualFilename = filename;
+    let extractionSuccess = false;
+    
+    // Reset phisherInfo
+    phisherInfo = null;
+    
+    if (isPhishER) {
+      console.log("PhishER wrapper detected, attempting to extract embedded email...");
+      
+      // Extract PhishER metadata
+      phisherInfo = extractPhishERInfo(content);
+      
+      // Extract the embedded email
+      const embeddedEmail = extractEmbeddedEmail(content);
+      
+      if (embeddedEmail && embeddedEmail.length > 100) {
+        console.log("Embedded email extracted successfully! Length:", embeddedEmail.length);
+        actualEmailContent = embeddedEmail;
+        actualFilename = "Embedded phishing email";
+        // Update rawHeaders to show the embedded email for export
+        rawHeaders = embeddedEmail;
+        extractionSuccess = true;
+        
+        // Store success status in phisherInfo
+        if (phisherInfo) {
+          phisherInfo.extractionSuccess = true;
+        }
+      } else {
+        console.error("Failed to extract embedded email or content too short");
+        // If extraction failed, show warning
+        const fileInfo = rootEl.querySelector("#emlFileInfo");
+        if (fileInfo) {
+          fileInfo.innerHTML = `<span style="color:#ef4444;">⚠️ PhishER wrapper detected but extraction FAILED. Analyzing wrapper instead of phishing email. This will show incorrect results!</span>`;
+        }
+        
+        // Store failure status
+        if (phisherInfo) {
+          phisherInfo.extractionSuccess = false;
+        }
+      }
+    }
+    
     // Extract headers (everything before first blank line)
-    const headerEnd = content.indexOf("\n\n");
-    const headersText = headerEnd > 0 ? content.substring(0, headerEnd) : content;
-    const bodyText = headerEnd > 0 ? content.substring(headerEnd + 2) : "";
+    const headerEnd = actualEmailContent.indexOf("\n\n");
+    const headersText = headerEnd > 0 ? actualEmailContent.substring(0, headerEnd) : actualEmailContent;
+    const bodyText = headerEnd > 0 ? actualEmailContent.substring(headerEnd + 2) : "";
     
     // Parse headers into key-value pairs
     // Special handling for headers that can appear multiple times (like Received)
@@ -362,10 +590,14 @@
     // Capture analysis results for export
     captureAnalysisResults(filename);
     
-    // Show export button
+    // Show export and clear buttons
     const exportButton = rootEl.querySelector("#emlExportButton");
+    const clearButton = rootEl.querySelector("#emlClearButton");
     if (exportButton) {
       exportButton.style.display = "inline-flex";
+    }
+    if (clearButton) {
+      clearButton.style.display = "inline-flex";
     }
   }
 
@@ -381,7 +613,53 @@
     
     const subjectWasEncoded = decodedSubject && decodedSubject !== subject;
 
+    // Check if this is a PhishER report
+    const showPhisherInfo = phisherInfo && phisherInfo.reporter;
+    const extractionWorked = phisherInfo && phisherInfo.extractionSuccess;
+
     container.innerHTML = `
+      ${showPhisherInfo ? `
+        <div style="background:rgba(147,51,234,0.1);border:2px solid rgba(147,51,234,0.5);border-radius:8px;padding:1rem;margin-bottom:1.5rem;">
+          <div style="font-size:1.1rem;font-weight:700;color:#a855f7;margin-bottom:0.75rem;">
+            📨 PHISHER REPORT DETECTED
+          </div>
+          <div style="font-size:0.875rem;color:#9ca3af;margin-bottom:0.75rem;">
+            ${extractionWorked ? 
+              `This email was reported as phishing through KnowBe4 PhishER. The analysis below shows the <strong style="color:#22c55e;">embedded phishing email ✓</strong>, not the reporting wrapper.` :
+              `<span style="color:#ef4444;"><strong>⚠️ EXTRACTION FAILED!</strong> Could not extract embedded email. Analysis shows the <strong>reporting wrapper</strong> (incorrect results). Check console for errors.</span>`
+            }
+          </div>
+          <div class="eml-grid" style="font-size:0.9rem;">
+            <div class="eml-label">Reported by:</div>
+            <div class="eml-value">${escapeHtml(phisherInfo.reporter)}</div>
+            
+            <div class="eml-label">Reported to:</div>
+            <div class="eml-value">${escapeHtml(phisherInfo.reportedTo)}</div>
+            
+            <div class="eml-label">Report date:</div>
+            <div class="eml-value">${escapeHtml(phisherInfo.reportedDate)}</div>
+            
+            ${extractionWorked ? `
+              <div class="eml-label">Extraction:</div>
+              <div class="eml-value"><span style="color:#22c55e;font-weight:600;">✓ Success</span></div>
+            ` : `
+              <div class="eml-label">Extraction:</div>
+              <div class="eml-value"><span style="color:#ef4444;font-weight:600;">✗ Failed</span></div>
+            `}
+          </div>
+        </div>
+        
+        ${extractionWorked ? `
+          <div style="font-size:1rem;font-weight:700;color:#f59e0b;margin-bottom:1rem;">
+            🚨 EMBEDDED PHISHING EMAIL:
+          </div>
+        ` : `
+          <div style="font-size:1rem;font-weight:700;color:#ef4444;margin-bottom:1rem;padding:0.75rem;background:rgba(239,68,68,0.1);border-radius:6px;">
+            ⚠️ WARNING: Analyzing wrapper email (incorrect results)
+          </div>
+        `}
+      ` : ''}
+      
       <div class="eml-grid">
         <div class="eml-label">From:</div>
         <div class="eml-value">${escapeHtml(from)}</div>
