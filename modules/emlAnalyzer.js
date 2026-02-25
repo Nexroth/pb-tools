@@ -13,6 +13,7 @@
   let emlData = null; // Parsed EML data
   let rawHeaders = "";
   let parsedHeaders = {};
+  let analysisResults = null; // Store complete analysis for export
 
   function init() {}
 
@@ -51,6 +52,9 @@
           <div class="flex gap-3 items-center mb-3">
             <button class="btn" id="emlFileButton">
               📧 Choose EML File
+            </button>
+            <button class="btn btn-secondary" id="emlExportButton" style="display:none;">
+              📄 Export Report
             </button>
             <input type="file" id="emlFileInput" accept=".eml,.txt,.msg" class="hidden">
             <span id="emlFileInfo" class="info-text-sm"></span>
@@ -164,6 +168,7 @@
     const toggleRawBtn = rootEl.querySelector("#emlToggleRaw");
     const copyHeadersBtn = rootEl.querySelector("#emlCopyHeaders");
     const toggleReceivedBtn = rootEl.querySelector("#emlToggleReceived");
+    const exportButton = rootEl.querySelector("#emlExportButton");
 
     if (fileButton && fileInput) {
       fileButton.addEventListener("click", () => {
@@ -237,6 +242,12 @@
       toggleReceivedBtn.addEventListener("click", () => {
         // Toggle between showing first hop and all hops
         renderReceivedPath(true);
+      });
+    }
+
+    if (exportButton) {
+      exportButton.addEventListener("click", () => {
+        exportAnalysisReport();
       });
     }
   }
@@ -347,6 +358,15 @@
     renderXHeadersSection();
     renderReceivedPath(false);
     renderRawHeaders();
+    
+    // Capture analysis results for export
+    captureAnalysisResults(filename);
+    
+    // Show export button
+    const exportButton = rootEl.querySelector("#emlExportButton");
+    if (exportButton) {
+      exportButton.style.display = "inline-flex";
+    }
   }
 
   function renderQuickInfo() {
@@ -1322,6 +1342,622 @@
     if (!container) return;
 
     container.textContent = rawHeaders;
+  }
+
+  function captureAnalysisResults(filename) {
+    // Capture all analysis data for export
+    analysisResults = {
+      filename: filename,
+      timestamp: new Date().toLocaleString(),
+      from: parsedHeaders["from"] || "(not found)",
+      to: parsedHeaders["to"] || "(not found)",
+      subject: parsedHeaders["decodedSubject"] || parsedHeaders["subject"] || "(no subject)",
+      date: parsedHeaders["date"] || "(no date)",
+      messageId: parsedHeaders["message-id"] || "(not found)",
+      returnPath: parsedHeaders["return-path"] || "(not found)",
+      
+      // Authentication
+      spf: parsedHeaders["received-spf"] || "(not found)",
+      dkim: parsedHeaders["authentication-results"] || "(not found)",
+      dmarc: parsedHeaders["dmarc"] || "(not found)",
+      
+      // Links and attachments
+      links: parsedHeaders.links || [],
+      attachments: parsedHeaders.attachments || [],
+      
+      // Routing
+      receivedHeaders: parsedHeaders.receivedHeaders || [],
+      
+      // X-Headers
+      xHeaders: parseXHeaders(),
+      
+      // Re-run verdict analysis for export
+      verdict: analyzeEmailVerdict()
+    };
+  }
+
+  function analyzeEmailVerdict() {
+    // Run the same analysis logic as renderAnalysis()
+    const issues = [];
+    let verdict = "LEGITIMATE";
+    let verdictColor = "#22c55e";
+    let borderColor = "rgba(34, 197, 94, 0.5)";
+    let bgColor = "rgba(34, 197, 94, 0.05)";
+    let confidence = "High";
+
+    // Check 1: From vs Return-Path
+    const from = parsedHeaders["from"] || "";
+    const returnPath = parsedHeaders["return-path"] || "";
+    const fromDomain = extractDomain(from);
+    const returnDomain = extractDomain(returnPath);
+    
+    if (fromDomain && returnDomain && fromDomain !== returnDomain) {
+      issues.push("⚠️ From domain doesn't match Return-Path domain");
+      verdict = "SUSPICIOUS";
+      verdictColor = "#f59e0b";
+      borderColor = "rgba(245, 158, 11, 0.5)";
+      bgColor = "rgba(245, 158, 11, 0.05)";
+    }
+
+    // Check 2: SPF
+    const spf = (parsedHeaders["received-spf"] || "").toLowerCase();
+    if (spf.includes("fail")) {
+      issues.push("❌ SPF authentication failed");
+      verdict = "LIKELY SPOOFING";
+      verdictColor = "#ef4444";
+      borderColor = "rgba(239, 68, 68, 0.5)";
+      bgColor = "rgba(239, 68, 68, 0.05)";
+      confidence = "High";
+    } else if (spf.includes("softfail")) {
+      issues.push("⚠️ SPF soft fail (weak authentication)");
+      if (verdict === "LEGITIMATE") {
+        verdict = "SUSPICIOUS";
+        verdictColor = "#f59e0b";
+        borderColor = "rgba(245, 158, 11, 0.5)";
+        bgColor = "rgba(245, 158, 11, 0.05)";
+      }
+    } else if (spf.includes("pass")) {
+      issues.push("✓ SPF passed");
+    }
+
+    // Check 3: DKIM
+    const authResults = (parsedHeaders["authentication-results"] || "").toLowerCase();
+    if (authResults.includes("dkim=fail")) {
+      issues.push("❌ DKIM authentication failed");
+      verdict = "LIKELY SPOOFING";
+      verdictColor = "#ef4444";
+      borderColor = "rgba(239, 68, 68, 0.5)";
+      bgColor = "rgba(239, 68, 68, 0.05)";
+      confidence = "High";
+    } else if (authResults.includes("dkim=pass")) {
+      issues.push("✓ DKIM passed");
+    }
+
+    // Check 4: Links
+    const links = parsedHeaders.links || [];
+    const suspiciousLinks = links.filter(link => 
+      link.isSuspicious || link.isIpBased || link.isShortened
+    );
+    if (suspiciousLinks.length > 0) {
+      issues.push(`⚠️ ${suspiciousLinks.length} suspicious link(s) detected`);
+      if (verdict === "LEGITIMATE") {
+        verdict = "SUSPICIOUS";
+        verdictColor = "#f59e0b";
+        borderColor = "rgba(245, 158, 11, 0.5)";
+        bgColor = "rgba(245, 158, 11, 0.05)";
+      }
+    }
+
+    // Check 5: Dangerous attachments
+    const attachments = parsedHeaders.attachments || [];
+    const dangerousAttachments = attachments.filter(att => att.isDangerous);
+    if (dangerousAttachments.length > 0) {
+      issues.push(`❌ ${dangerousAttachments.length} dangerous attachment(s) detected`);
+      verdict = "LIKELY MALICIOUS";
+      verdictColor = "#ef4444";
+      borderColor = "rgba(239, 68, 68, 0.5)";
+      bgColor = "rgba(239, 68, 68, 0.05)";
+      confidence = "High";
+    }
+
+    if (issues.length === 0) {
+      issues.push("✓ No obvious security issues detected");
+    }
+
+    return {
+      verdict,
+      verdictColor,
+      borderColor,
+      bgColor,
+      confidence,
+      issues
+    };
+  }
+
+  function exportAnalysisReport() {
+    if (!analysisResults) {
+      alert("No analysis data available to export");
+      return;
+    }
+
+    const { verdict, verdictColor, borderColor, bgColor, issues } = analysisResults.verdict;
+    const reportDate = new Date().toLocaleString();
+    
+    // Helper function to format X-header display
+    function formatXHeaderValue(xHeaderObj) {
+      if (!xHeaderObj) return '';
+      
+      if (xHeaderObj.score !== undefined) {
+        // Spam score
+        const score = xHeaderObj.score;
+        const level = score > 5 ? 'High' : score > 2 ? 'Medium' : 'Low';
+        const color = score > 5 ? '#ef4444' : score > 2 ? '#f59e0b' : '#22c55e';
+        return `<span style="color:${color};font-weight:600;">${score} (${level})</span>`;
+      } else if (xHeaderObj.ip) {
+        // IP address
+        return `<span style="font-family:monospace;">${escapeHtml(xHeaderObj.ip)}</span>`;
+      } else if (xHeaderObj.level !== undefined) {
+        // Priority
+        const level = xHeaderObj.level;
+        const text = level === 1 || level === '1' ? 'High' : 
+                     level === 3 || level === '3' ? 'Normal' : 
+                     level === 5 || level === '5' ? 'Low' : level;
+        return `<span>${escapeHtml(String(text))}</span>`;
+      } else {
+        // Generic value
+        return escapeHtml(xHeaderObj.value || String(xHeaderObj));
+      }
+    }
+    
+    // Get hop authentication for routing section
+    const hopAuth = analyzeHopAuthentication(true);
+
+    // Build HTML report
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Analysis Report - ${escapeHtml(analysisResults.subject)}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      color: #1f2937;
+      background: #f9fafb;
+      padding: 2rem;
+    }
+    
+    .report-container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+    
+    .report-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 2rem;
+    }
+    
+    .report-title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    
+    .report-meta {
+      font-size: 0.875rem;
+      opacity: 0.9;
+    }
+    
+    .report-body {
+      padding: 2rem;
+    }
+    
+    .section {
+      margin-bottom: 2rem;
+      page-break-inside: avoid;
+    }
+    
+    .section-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #4b5563;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .verdict-box {
+      background: ${bgColor};
+      border: 2px solid ${borderColor};
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    
+    .verdict-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: ${verdictColor};
+      margin-bottom: 0.5rem;
+    }
+    
+    .verdict-subtitle {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 1rem;
+    }
+    
+    .issues-list {
+      list-style: none;
+      padding: 0;
+    }
+    
+    .issue-item {
+      padding: 0.5rem 0;
+      font-size: 0.95rem;
+      color: #374151;
+    }
+    
+    .info-grid {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 0.75rem;
+      font-size: 0.95rem;
+    }
+    
+    .info-label {
+      font-weight: 600;
+      color: #6b7280;
+    }
+    
+    .info-value {
+      color: #1f2937;
+      word-break: break-word;
+    }
+    
+    .hop-item {
+      background: #f9fafb;
+      border-left: 3px solid #e5e7eb;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      border-radius: 4px;
+    }
+    
+    .hop-item.suspicious {
+      border-left-color: #ef4444;
+      background: rgba(239, 68, 68, 0.05);
+    }
+    
+    .hop-item.legitimate {
+      border-left-color: #22c55e;
+      background: rgba(34, 197, 94, 0.05);
+    }
+    
+    .hop-title {
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.5rem;
+      font-size: 0.95rem;
+    }
+    
+    .hop-detail {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 0.25rem;
+    }
+    
+    .hop-auth {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #e5e7eb;
+    }
+    
+    .hop-auth-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .auth-check {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0;
+      font-size: 0.875rem;
+    }
+    
+    .auth-check-label {
+      font-weight: 600;
+      min-width: 60px;
+    }
+    
+    .auth-check-status {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+    
+    .link-item, .attachment-item {
+      background: #f9fafb;
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    
+    .link-item.has-warnings {
+      border: 1px solid #fbbf24;
+      background: rgba(251, 191, 36, 0.05);
+    }
+    
+    .link-url {
+      font-family: 'Courier New', monospace;
+      font-size: 0.875rem;
+      color: #2563eb;
+      word-break: break-all;
+      margin-bottom: 0.5rem;
+    }
+    
+    .link-protocol {
+      display: inline-block;
+      padding: 0.2rem 0.4rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    
+    .link-protocol.https {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .link-protocol.http {
+      background: #fed7aa;
+      color: #9a3412;
+    }
+    
+    .warning-badge, .danger-badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-right: 0.5rem;
+      margin-top: 0.25rem;
+    }
+    
+    .warning-badge {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    
+    .danger-badge {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .report-footer {
+      background: #f9fafb;
+      padding: 1.5rem 2rem;
+      text-align: center;
+      font-size: 0.875rem;
+      color: #6b7280;
+      border-top: 1px solid #e5e7eb;
+    }
+    
+    @media print {
+      body {
+        background: white;
+        padding: 0;
+      }
+      .report-container {
+        box-shadow: none;
+        border-radius: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="report-container">
+    <div class="report-header">
+      <div class="report-title">📧 Email Analysis Report</div>
+      <div class="report-meta">
+        Generated: ${escapeHtml(reportDate)} | 
+        Source: PB Tools EML Analyzer
+      </div>
+    </div>
+    
+    <div class="report-body">
+      <!-- Automated Analysis -->
+      <div class="section">
+        <h2 class="section-title">1. Automated Analysis</h2>
+        <div class="verdict-box">
+          <div class="verdict-title">${escapeHtml(verdict)}</div>
+          <div class="verdict-subtitle">Confidence: ${escapeHtml(analysisResults.verdict.confidence)}</div>
+          <ul class="issues-list">
+            ${issues.map(issue => `<li class="issue-item">${escapeHtml(issue)}</li>`).join('')}
+          </ul>
+        </div>
+      </div>
+      
+      <!-- Message Overview -->
+      <div class="section">
+        <h2 class="section-title">2. Message Overview</h2>
+        <div class="info-grid">
+          <div class="info-label">From:</div>
+          <div class="info-value">${escapeHtml(analysisResults.from)}</div>
+          
+          <div class="info-label">To:</div>
+          <div class="info-value">${escapeHtml(analysisResults.to)}</div>
+          
+          <div class="info-label">Subject:</div>
+          <div class="info-value">${escapeHtml(analysisResults.subject)}</div>
+          
+          <div class="info-label">Date:</div>
+          <div class="info-value">${escapeHtml(analysisResults.date)}</div>
+          
+          <div class="info-label">Message-ID:</div>
+          <div class="info-value">${escapeHtml(analysisResults.messageId)}</div>
+          
+          <div class="info-label">Return-Path:</div>
+          <div class="info-value">${escapeHtml(analysisResults.returnPath)}</div>
+        </div>
+      </div>
+      
+      <!-- Authentication Results -->
+      <div class="section">
+        <h2 class="section-title">3. Authentication Results</h2>
+        <div class="info-grid">
+          <div class="info-label">SPF:</div>
+          <div class="info-value">${escapeHtml(analysisResults.spf)}</div>
+          
+          <div class="info-label">DKIM:</div>
+          <div class="info-value">${escapeHtml(analysisResults.dkim)}</div>
+          
+          <div class="info-label">DMARC:</div>
+          <div class="info-value">${escapeHtml(analysisResults.dmarc)}</div>
+        </div>
+      </div>
+      
+      ${analysisResults.links.length > 0 ? `
+      <!-- Links Found -->
+      <div class="section">
+        <h2 class="section-title">4. Links Found (${analysisResults.links.length})</h2>
+        ${analysisResults.links.map(link => `
+          <div class="link-item ${link.warnings && link.warnings.length > 0 ? 'has-warnings' : ''}">
+            <div>
+              <span class="link-protocol ${link.protocol}">${link.protocol.toUpperCase()}</span>
+              <span class="link-url">${escapeHtml(link.url)}</span>
+            </div>
+            ${link.warnings && link.warnings.length > 0 ? `
+              <div style="margin-top:0.5rem;">
+                ${link.warnings.map(warning => `<span class="warning-badge">⚠️ ${escapeHtml(warning)}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ` : ''}
+      
+      ${analysisResults.attachments.length > 0 ? `
+      <!-- Attachments -->
+      <div class="section">
+        <h2 class="section-title">5. Attachments (${analysisResults.attachments.length})</h2>
+        ${analysisResults.attachments.map(att => `
+          <div class="attachment-item">
+            <div style="font-weight:600;margin-bottom:0.5rem;">${escapeHtml(att.filename)}</div>
+            ${att.contentType ? `<div class="hop-detail">Type: ${escapeHtml(att.contentType)}</div>` : ''}
+            ${att.isDangerous ? `
+              <div style="margin-top:0.5rem;">
+                <span class="danger-badge">⚠️ DANGEROUS FILE TYPE</span>
+              </div>
+              <div style="margin-top:0.5rem;font-size:0.875rem;color:#991b1b;">
+                This file type can contain executable code and should be treated with extreme caution.
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ` : ''}
+      
+      <!-- Routing Path -->
+      <div class="section">
+        <h2 class="section-title">6. Routing Path (${analysisResults.receivedHeaders.length} hops)</h2>
+        ${analysisResults.receivedHeaders.slice().reverse().map((hop, index) => {
+          const { ip, server } = extractIpAndServer(hop);
+          const isFirstHop = index === 0;
+          const hopAuthData = isFirstHop ? hopAuth : { status: 'relay', checks: [] };
+          
+          return `
+          <div class="hop-item ${hopAuthData.status}">
+            <div class="hop-title">Hop ${index + 1} of ${analysisResults.receivedHeaders.length} ${isFirstHop ? '(Original Sender)' : '(Relay)'}</div>
+            ${server ? `<div class="hop-detail">🌐 Server: ${escapeHtml(server)}</div>` : ''}
+            ${ip ? `<div class="hop-detail">📍 IP: ${escapeHtml(ip)}</div>` : ''}
+            
+            ${isFirstHop && hopAuthData.checks.length > 0 ? `
+              <div class="hop-auth">
+                <div class="hop-auth-title">Authentication Results</div>
+                ${hopAuthData.checks.map(check => `
+                  <div class="auth-check">
+                    <span>${check.icon}</span>
+                    <span class="auth-check-label">${check.label}:</span>
+                    <span>${check.status}</span>
+                    <span class="auth-check-status">- ${check.detail}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+          `;
+        }).join('')}
+      </div>
+      
+      ${Object.keys(analysisResults.xHeaders).some(k => analysisResults.xHeaders[k]) ? `
+      <!-- X-Headers Analysis -->
+      <div class="section">
+        <h2 class="section-title">7. X-Headers Analysis</h2>
+        <div class="info-grid">
+          ${analysisResults.xHeaders.spam ? `
+            <div class="info-label">Spam Score:</div>
+            <div class="info-value">${formatXHeaderValue(analysisResults.xHeaders.spam)}</div>
+          ` : ''}
+          
+          ${analysisResults.xHeaders.originatingIp ? `
+            <div class="info-label">Originating IP:</div>
+            <div class="info-value">${formatXHeaderValue(analysisResults.xHeaders.originatingIp)}</div>
+          ` : ''}
+          
+          ${analysisResults.xHeaders.mailer ? `
+            <div class="info-label">Email Client:</div>
+            <div class="info-value">${formatXHeaderValue(analysisResults.xHeaders.mailer)}</div>
+          ` : ''}
+          
+          ${analysisResults.xHeaders.priority ? `
+            <div class="info-label">Priority:</div>
+            <div class="info-value">${formatXHeaderValue(analysisResults.xHeaders.priority)}</div>
+          ` : ''}
+          
+          ${analysisResults.xHeaders.other && analysisResults.xHeaders.other.length > 0 ? `
+            <div class="info-label">Additional Headers:</div>
+            <div class="info-value">${analysisResults.xHeaders.other.length} other X-header(s)</div>
+          ` : ''}
+        </div>
+      </div>
+      ` : ''}
+    </div>
+    
+    <div class="report-footer">
+      <div>Report generated by <strong>PB Tools EML Analyzer</strong></div>
+      <div style="margin-top:0.25rem;">Original File: ${escapeHtml(analysisResults.filename)}</div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    // Create and download the file
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `email-analysis-report-${Date.now()}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   function escapeHtml(text) {

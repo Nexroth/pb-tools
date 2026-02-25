@@ -91,6 +91,14 @@
 
         <button
           class="nav-item"
+          data-module="qrAnalyzer"
+        >
+          <span class="nav-icon">📱</span>
+          <span class="nav-label">QR Analyzer</span>
+        </button>
+
+        <button
+          class="nav-item"
           data-module="emlAnalyzer"
         >
           <span class="nav-icon">📧</span>
@@ -108,7 +116,7 @@
 
       <div class="sidebar-footer">
         <span class="env-badge">Local only</span>
-        <span class="version-badge">v0.3.0</span>
+        <span class="version-badge">v0.4.0</span>
       </div>
     </aside>
 
@@ -216,6 +224,7 @@
   <script src="lib/papaparse.min.js"></script>
   <script src="lib/xlsx.full.min.js"></script>
   <script src="lib/chart.umd.js"></script>
+  <script src="lib/jsQR.min.js"></script>
 
   <!-- Core app + modules -->
   <script src="app.js"></script>
@@ -224,6 +233,7 @@
   <script src="modules/emailTemplater.js"></script>
   <script src="modules/hashGenerator.js"></script>
   <script src="modules/base64Toolkit.js"></script>
+  <script src="modules/qrAnalyzer.js"></script>
   <script src="modules/emlAnalyzer.js"></script>
   <script src="modules/settings.js"></script>
 </body>
