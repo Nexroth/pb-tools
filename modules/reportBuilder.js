@@ -216,8 +216,8 @@ ${chartsHtml}
           <input type="text" class="rb-title-input" id="rbTitleInput" value="${escHtml(reportTitle)}" placeholder="Report title…">
         </div>
         <div class="rb-header-right">
-          <button class="btn btn-secondary" id="rbClearBtn" style="font-size:0.75rem;padding:0.3rem 0.65rem;" ${!reportCharts.length ? "disabled" : ""}>Clear all</button>
-          <button class="btn" id="rbExportBtn" style="font-size:0.75rem;padding:0.3rem 0.65rem;" ${!reportCharts.length ? "disabled" : ""}>⬆ Export HTML</button>
+          <button class="btn btn-secondary btn-sm" id="rbClearBtn" ${!reportCharts.length ? "disabled" : ""}>Clear all</button>
+          <button class="btn btn-sm" id="rbExportBtn" ${!reportCharts.length ? "disabled" : ""}>⬆ Export HTML</button>
         </div>
       </div>
 
@@ -269,7 +269,7 @@ ${chartsHtml}
               <div class="rb-preview-hint">Select a column to preview.</div>
             </div>
 
-            <button class="btn" id="rbAddChartBtn" style="width:100%;margin-top:0.5rem;font-size:0.78rem;" disabled>
+            <button class="btn w-full mt-3" id="rbAddChartBtn" disabled>
               + Add to report
             </button>
           `}
@@ -279,8 +279,8 @@ ${chartsHtml}
         <div class="rb-canvas" id="rbCanvas">
           ${!reportCharts.length ? `
             <div class="rb-canvas-empty">
-              <div style="font-size:2rem;opacity:0.3">📈</div>
-              <div style="opacity:0.4;font-size:0.85rem;margin-top:0.5rem;">Charts you add will appear here.</div>
+              <div class="rb-empty-icon">📈</div>
+              <div class="rb-empty-text">Charts you add will appear here.</div>
             </div>
           ` : ""}
         </div>
@@ -436,8 +436,8 @@ ${chartsHtml}
       if (rbCanvas && !rbCanvas.querySelector(".rb-chart-card")) {
         rbCanvas.innerHTML = `
           <div class="rb-canvas-empty">
-            <div style="font-size:2rem;opacity:0.3">📈</div>
-            <div style="opacity:0.4;font-size:0.85rem;margin-top:0.5rem;">Charts you add will appear here.</div>
+            <div class="rb-empty-icon">📈</div>
+            <div class="rb-empty-text">Charts you add will appear here.</div>
           </div>`;
         document.getElementById("rbExportBtn").disabled = true;
         document.getElementById("rbClearBtn").disabled  = true;

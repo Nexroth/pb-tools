@@ -12,47 +12,70 @@
   function render() {
     const container = document.getElementById("moduleContainer");
     if (!container) return;
+
+    // Setup scrolling container
+    container.style.cssText = `
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      max-height: calc(100vh - 140px) !important;
+      position: relative;
+    `;
+
     container.innerHTML = "";
 
-    const card = document.createElement("div");
-    card.className = "module-card";
-    card.innerHTML = `
-      <div class="module-card-body" style="padding-top:0;">
-        <section style="margin-bottom:1rem;">
-          <h3 style="font-size:0.9rem;margin:0 0 0.4rem;">Theme</h3>
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-            <button class="btn btn-secondary" data-theme="dark">Dark (default)</button>
-            <button class="btn btn-secondary" data-theme="light">Light</button>
-            <button class="btn btn-secondary" data-theme="pb-dashboard">PB Dashboard</button>
-          </div>
-        </section>
+    const wrapper = document.createElement("div");
+    wrapper.className = "settings-wrapper";
+    wrapper.style.cssText = `
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    `;
 
-        <section>
-          <h3 style="font-size:0.9rem;margin:0 0 0.4rem;">About</h3>
-          <p style="font-size:0.8rem;color:#9ca3af;">
-            PB Tools â€“ internal helper app for CSV / spreadsheet workflows.
+    wrapper.innerHTML = `
+      <div class="module-content-wrapper">
+        <div class="section-card mb-5">
+          <div class="section-card-header">Theme</div>
+          <div class="flex-col gap-2">
+            <label class="form-label">Select theme</label>
+            <select class="form-select" id="themeSelect" style="max-width:250px;">
+              <option value="dark">Dark (default)</option>
+              <option value="light">Light</option>
+              <option value="pb-dashboard">PB Dashboard</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-header">About</div>
+          <p class="info-text">
+            PB Tools - internal helper app for CSV / spreadsheet workflows.
           </p>
-        </section>
+        </div>
       </div>
     `;
 
-    container.appendChild(card);
-    rootEl = card;
+    container.appendChild(wrapper);
+    rootEl = wrapper;
 
     wireThemeButtons();
   }
 
   function wireThemeButtons() {
     if (!rootEl) return;
-    const buttons = rootEl.querySelectorAll("[data-theme]");
+    const themeSelect = rootEl.querySelector("#themeSelect");
     const appRoot = document.getElementById("app");
-    if (!appRoot) return;
+    if (!appRoot || !themeSelect) return;
 
-    buttons.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const theme = btn.getAttribute("data-theme");
-        setTheme(appRoot, theme);
-      });
+    // Set current theme in dropdown
+    const currentTheme = localStorage.getItem("pbTools_theme") || "theme-dark";
+    const themeValue = currentTheme.replace("theme-", "");
+    themeSelect.value = themeValue;
+
+    // Listen for changes
+    themeSelect.addEventListener("change", (e) => {
+      const theme = e.target.value;
+      setTheme(appRoot, theme);
     });
   }
 

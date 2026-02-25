@@ -40,103 +40,66 @@
     `;
 
     wrapper.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:1rem;padding-left:1.2rem;padding-right:1rem;padding-bottom:0.5rem;">
+      <div class="module-content-wrapper" style="padding-left:1.2rem;">
         
         <!-- Upload Section -->
-        <div style="
-          background:#020617;
-          border-radius:0.6rem;
-          border:1px solid rgba(148,163,184,0.35);
-          padding:0.75rem 0.9rem;
-        ">
-          <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+        <div class="section-card">
+          <div class="section-card-header">
             1. Load EML File
           </div>
           
-          <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem;">
+          <div class="flex gap-3 items-center mb-3">
             <button class="btn" id="emlFileButton">
               📧 Choose EML File
             </button>
-            <input type="file" id="emlFileInput" accept=".eml,.txt,.msg" style="display:none">
-            <span id="emlFileInfo" style="font-size:0.75rem;color:#9ca3af;"></span>
+            <input type="file" id="emlFileInput" accept=".eml,.txt,.msg" class="hidden">
+            <span id="emlFileInfo" class="info-text-sm"></span>
           </div>
 
-          <div id="emlDropzone" style="
-            border:2px dashed rgba(148,163,184,0.4);
-            border-radius:0.5rem;
-            padding:2rem;
-            text-align:center;
-            background:rgba(15,23,42,0.4);
-            cursor:pointer;
-            transition:all 0.2s;
-          ">
-            <div style="font-size:2rem;margin-bottom:0.5rem;">📧</div>
-            <div style="font-size:0.85rem;color:#e5e7eb;margin-bottom:0.25rem;">
+          <div id="emlDropzone" class="dropzone">
+            <div class="dropzone-icon">📧</div>
+            <div class="dropzone-text">
               Drop EML file here or click to browse
             </div>
-            <div style="font-size:0.7rem;color:#9ca3af;">
+            <div class="dropzone-hint">
               Supports .eml, .msg, and .txt files
             </div>
           </div>
         </div>
 
         <!-- Analysis Results Section -->
-        <div id="emlAnalysisSection" style="display:none;">
+        <div id="emlAnalysisSection" class="hidden">
           
           <!-- Quick Info Card -->
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-            margin-bottom:1rem;
-          ">
-            <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+          <div class="section-card mb-5">
+            <div class="section-card-header">
               2. Message Overview
             </div>
-            <div id="emlQuickInfo" style="font-size:0.8rem;"></div>
+            <div id="emlQuickInfo" class="info-text"></div>
           </div>
 
           <!-- Automated Analysis Card -->
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-            margin-bottom:1rem;
-          ">
-            <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+          <div class="section-card mb-5">
+            <div class="section-card-header">
               3. Automated Analysis
             </div>
-            <div id="emlAnalysis" style="font-size:0.8rem;"></div>
+            <div id="emlAnalysis" class="info-text"></div>
           </div>
 
           <!-- Key Headers Card -->
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-            margin-bottom:1rem;
-          ">
-            <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+          <div class="section-card mb-5">
+            <div class="section-card-header">
               4. Key Headers
             </div>
-            <div id="emlKeyHeaders" style="font-size:0.8rem;"></div>
+            <div id="emlKeyHeaders" class="info-text"></div>
           </div>
 
           <!-- Authentication Results Card -->
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-            margin-bottom:1rem;
-          ">
-            <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+          <div class="section-card mb-5">
+            <div class="section-card-header">
               5. Authentication Results
             </div>
-            <div id="emlAuthResults" style="font-size:0.8rem;"></div>
+            <div id="emlAuthResults" class="info-text"></div>
           </div>
 
           <!-- Links Section (dynamically shown/hidden) -->
@@ -149,58 +112,35 @@
           <div id="emlXHeadersSection"></div>
 
           <!-- Received Path Card -->
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-            margin-bottom:1rem;
-          ">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-              <div style="font-weight:600;font-size:0.9rem;">
+          <div class="section-card mb-5">
+            <div class="flex justify-between items-center mb-3">
+              <div class="section-card-title">
                 6. Routing Path
               </div>
-              <button class="btn btn-secondary" id="emlToggleReceived" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+              <button class="btn btn-secondary btn-xs" id="emlToggleReceived">
                 Show All Hops
               </button>
             </div>
-            <div id="emlReceivedPath" style="font-size:0.8rem;"></div>
+            <div id="emlReceivedPath" class="info-text"></div>
           </div>
 
           <!-- Raw Headers Card -->
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-          ">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-              <div style="font-weight:600;font-size:0.9rem;">
+          <div class="section-card">
+            <div class="flex justify-between items-center mb-3">
+              <div class="section-card-title">
                 7. Raw Headers
               </div>
-              <div style="display:flex;gap:0.5rem;">
-                <button class="btn btn-secondary" id="emlCopyHeaders" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+              <div class="flex gap-3">
+                <button class="btn btn-secondary btn-xs" id="emlCopyHeaders">
                   Copy All
                 </button>
-                <button class="btn btn-secondary" id="emlToggleRaw" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+                <button class="btn btn-secondary btn-xs" id="emlToggleRaw">
                   Show Raw
                 </button>
               </div>
             </div>
-            <div id="emlRawHeaders" style="display:none;">
-              <pre style="
-                background:rgba(15,23,42,0.9);
-                border:1px solid rgba(31,41,55,0.8);
-                border-radius:0.4rem;
-                padding:0.75rem;
-                font-size:0.7rem;
-                color:#e5e7eb;
-                overflow-x:auto;
-                white-space:pre-wrap;
-                word-wrap:break-word;
-                max-height:400px;
-                overflow-y:auto;
-              " id="emlRawHeadersContent"></pre>
+            <div id="emlRawHeaders" class="hidden">
+              <pre class="code-block" style="max-height:400px;overflow-y:auto;" id="emlRawHeadersContent"></pre>
             </div>
           </div>
 
@@ -270,9 +210,16 @@
       toggleRawBtn.addEventListener("click", () => {
         const rawSection = rootEl.querySelector("#emlRawHeaders");
         if (rawSection) {
-          const isVisible = rawSection.style.display !== "none";
-          rawSection.style.display = isVisible ? "none" : "block";
-          toggleRawBtn.textContent = isVisible ? "Show Raw" : "Hide Raw";
+          const isVisible = rawSection.classList.contains("block");
+          if (isVisible) {
+            rawSection.classList.remove("block");
+            rawSection.classList.add("hidden");
+            toggleRawBtn.textContent = "Show Raw";
+          } else {
+            rawSection.classList.remove("hidden");
+            rawSection.classList.add("block");
+            toggleRawBtn.textContent = "Hide Raw";
+          }
         }
       });
     }
@@ -386,7 +333,8 @@
     // Show analysis section
     const analysisSection = rootEl.querySelector("#emlAnalysisSection");
     if (analysisSection) {
-      analysisSection.style.display = "block";
+      analysisSection.classList.remove("hidden");
+      analysisSection.classList.add("block");
     }
 
     // Render all sections
@@ -414,38 +362,30 @@
     const subjectWasEncoded = decodedSubject && decodedSubject !== subject;
 
     container.innerHTML = `
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 1rem;">
-        <div style="color:#9ca3af;font-weight:500;">From:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(from)}</div>
+      <div class="eml-grid">
+        <div class="eml-label">From:</div>
+        <div class="eml-value">${escapeHtml(from)}</div>
         
-        <div style="color:#9ca3af;font-weight:500;">To:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(to)}</div>
+        <div class="eml-label">To:</div>
+        <div class="eml-value">${escapeHtml(to)}</div>
         
-        <div style="color:#9ca3af;font-weight:500;">Subject:</div>
-        <div style="color:#e5e7eb;">
+        <div class="eml-label">Subject:</div>
+        <div class="eml-value">
           ${escapeHtml(decodedSubject || subject)}
           ${subjectWasEncoded ? `
             <details style="margin-top:0.25rem;">
-              <summary style="cursor:pointer;color:#9ca3af;font-size:0.7rem;">
+              <summary class="eml-summary-label">
                 View Encoded Subject
               </summary>
-              <div style="
-                margin-top:0.25rem;
-                padding:0.25rem 0.5rem;
-                background:rgba(0,0,0,0.3);
-                border-radius:0.3rem;
-                font-family:monospace;
-                font-size:0.7rem;
-                color:#d1d5db;
-              ">
+              <div class="eml-encoded-original">
                 ${escapeHtml(subject)}
               </div>
             </details>
           ` : ''}
         </div>
         
-        <div style="color:#9ca3af;font-weight:500;">Date:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(date)}</div>
+        <div class="eml-label">Date:</div>
+        <div class="eml-value">${escapeHtml(date)}</div>
       </div>
     `;
   }
@@ -541,33 +481,21 @@
     }
 
     container.innerHTML = `
-      <div style="
-        background:rgba(15,23,42,0.9);
-        border:1px solid rgba(31,41,55,0.8);
-        border-radius:0.4rem;
-        padding:0.75rem;
-        margin-bottom:0.75rem;
-      ">
-        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
-          <div style="font-weight:600;color:${verdictColor};font-size:0.9rem;">
+      <div class="eml-verdict-box" style="border-color:${verdictColor};">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="eml-verdict-title" style="color:${verdictColor};">
             Verdict: ${verdict}
           </div>
-          <div style="
-            font-size:0.7rem;
-            padding:0.15rem 0.4rem;
-            border-radius:999px;
-            background:rgba(148,163,184,0.2);
-            color:#9ca3af;
-          ">
+          <div class="eml-verdict-subtitle" style="background:rgba(148,163,184,0.2);">
             Confidence: ${confidence}
           </div>
         </div>
-        <div style="font-size:0.75rem;color:#9ca3af;">
-          ${issues.map(issue => `<div style="margin-bottom:0.25rem;">${escapeHtml(issue)}</div>`).join('')}
+        <div class="eml-issues-list">
+          ${issues.map(issue => `<div class="eml-issue-item">${escapeHtml(issue)}</div>`).join('')}
         </div>
       </div>
 
-      <div style="font-size:0.7rem;color:#6b7280;font-style:italic;">
+      <div class="eml-note">
         Note: This is automated analysis based on email headers only. ${isForwarded ? 'For forwarded emails, check the "Original Sender" hop in Routing Path below. ' : ''}Manual review is recommended for important decisions.
       </div>
     `;
@@ -600,15 +528,15 @@
     const returnPath = parsedHeaders["return-path"] || "(not found)";
 
     container.innerHTML = `
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 1rem;">
-        <div style="color:#9ca3af;font-weight:500;">Message-ID:</div>
-        <div style="color:#e5e7eb;word-break:break-all;">${escapeHtml(messageId)}</div>
+      <div class="eml-grid">
+        <div class="eml-label">Message-ID:</div>
+        <div class="eml-value-wrap">${escapeHtml(messageId)}</div>
         
-        <div style="color:#9ca3af;font-weight:500;">Reply-To:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(replyTo)}</div>
+        <div class="eml-label">Reply-To:</div>
+        <div class="eml-value">${escapeHtml(replyTo)}</div>
         
-        <div style="color:#9ca3af;font-weight:500;">Return-Path:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(returnPath)}</div>
+        <div class="eml-label">Return-Path:</div>
+        <div class="eml-value">${escapeHtml(returnPath)}</div>
       </div>
     `;
   }
@@ -622,15 +550,15 @@
     const dmarc = parsedHeaders["authentication-results"] || "(not found)";
 
     container.innerHTML = `
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 1rem;">
-        <div style="color:#9ca3af;font-weight:500;">SPF:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(spf)}</div>
+      <div class="eml-grid">
+        <div class="eml-label">SPF:</div>
+        <div class="eml-value">${escapeHtml(spf)}</div>
         
-        <div style="color:#9ca3af;font-weight:500;">DKIM:</div>
-        <div style="color:#e5e7eb;">${escapeHtml(dkim)}</div>
+        <div class="eml-label">DKIM:</div>
+        <div class="eml-value">${escapeHtml(dkim)}</div>
         
-        <div style="color:#9ca3af;font-weight:500;">Auth-Results:</div>
-        <div style="color:#e5e7eb;word-break:break-all;">${escapeHtml(dmarc)}</div>
+        <div class="eml-label">Auth-Results:</div>
+        <div class="eml-value-wrap">${escapeHtml(dmarc)}</div>
       </div>
     `;
   }
@@ -960,49 +888,31 @@
     const links = parsedHeaders.links || [];
     
     if (links.length === 0) {
-      container.style.display = "none";
+      container.classList.add("hidden");
       return;
     }
     
-    container.style.display = "block";
+    container.classList.remove("hidden");
     
     container.innerHTML = `
-      <div style="
-        background:#020617;
-        border-radius:0.6rem;
-        border:1px solid rgba(148,163,184,0.35);
-        padding:0.75rem 0.9rem;
-        margin-bottom:1rem;
-      ">
-        <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+      <div class="section-card mb-5">
+        <div class="section-card-header">
           🔗 Links Found in Email Body (${links.length})
         </div>
         
-        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+        <div class="flex-col gap-3">
           ${links.map(link => `
-            <div style="
-              background:rgba(15,23,42,0.9);
-              border:1px solid ${link.warnings.length > 0 ? 'rgba(245,158,11,0.5)' : 'rgba(31,41,55,0.8)'};
-              border-radius:0.4rem;
-              padding:0.5rem 0.75rem;
-              font-size:0.75rem;
-            ">
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
+            <div class="eml-link-item ${link.warnings.length > 0 ? 'eml-link-item-warning' : ''}">
+              <div class="eml-link-header">
                 <span>${link.protocol === 'https' ? '🔒' : '⚠️'}</span>
-                <span style="color:${link.protocol === 'https' ? '#22c55e' : '#f59e0b'};font-weight:500;">
+                <span class="eml-link-protocol-${link.protocol}">
                   ${link.protocol.toUpperCase()}
                 </span>
                 ${link.warnings.length > 0 ? link.warnings.map(w => `
-                  <span style="
-                    font-size:0.65rem;
-                    padding:0.15rem 0.4rem;
-                    border-radius:999px;
-                    background:rgba(245,158,11,0.2);
-                    color:#f59e0b;
-                  ">⚠️ ${escapeHtml(w)}</span>
+                  <span class="eml-warning-badge">⚠️ ${escapeHtml(w)}</span>
                 `).join('') : ''}
               </div>
-              <div style="color:#60a5fa;word-break:break-all;font-family:monospace;font-size:0.7rem;">
+              <div class="eml-link-url">
                 ${escapeHtml(link.url)}
               </div>
             </div>
@@ -1010,7 +920,7 @@
         </div>
         
         ${links.some(l => l.warnings.length > 0) ? `
-          <div style="margin-top:0.5rem;font-size:0.7rem;color:#f59e0b;font-style:italic;">
+          <div class="eml-warning-note">
             ⚠️ Suspicious links detected. Verify before clicking.
           </div>
         ` : ''}
@@ -1025,59 +935,34 @@
     const attachments = parsedHeaders.attachments || [];
     
     if (attachments.length === 0) {
-      container.style.display = "none";
+      container.classList.add("hidden");
       return;
     }
     
-    container.style.display = "block";
+    container.classList.remove("hidden");
     
     container.innerHTML = `
-      <div style="
-        background:#020617;
-        border-radius:0.6rem;
-        border:1px solid rgba(148,163,184,0.35);
-        padding:0.75rem 0.9rem;
-        margin-bottom:1rem;
-      ">
-        <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+      <div class="section-card mb-5">
+        <div class="section-card-header">
           📎 Attachments (${attachments.length})
         </div>
         
-        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+        <div class="flex-col gap-3">
           ${attachments.map(att => `
-            <div style="
-              background:rgba(15,23,42,0.9);
-              border:1px solid ${att.warnings.length > 0 ? 'rgba(239,68,68,0.5)' : 'rgba(31,41,55,0.8)'};
-              border-radius:0.4rem;
-              padding:0.5rem 0.75rem;
-              font-size:0.75rem;
-            ">
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
+            <div class="eml-attachment-item ${att.warnings.length > 0 ? 'eml-attachment-item-danger' : ''}">
+              <div class="eml-attachment-header">
                 <span>${att.warnings.length > 0 ? '⚠️' : '📄'}</span>
-                <span style="color:#e5e7eb;font-weight:500;">
+                <span class="eml-attachment-filename">
                   ${escapeHtml(att.filename)}
                 </span>
-                <span style="
-                  font-size:0.65rem;
-                  padding:0.15rem 0.4rem;
-                  border-radius:999px;
-                  background:rgba(148,163,184,0.2);
-                  color:#9ca3af;
-                ">
+                <span class="eml-extension-badge">
                   .${escapeHtml(att.extension)}
                 </span>
               </div>
               ${att.warnings.length > 0 ? `
                 <div style="margin-top:0.25rem;">
                   ${att.warnings.map(w => `
-                    <span style="
-                      font-size:0.65rem;
-                      padding:0.15rem 0.4rem;
-                      border-radius:999px;
-                      background:rgba(239,68,68,0.2);
-                      color:#ef4444;
-                      margin-right:0.25rem;
-                    ">⚠️ ${escapeHtml(w)}</span>
+                    <span class="eml-danger-badge">⚠️ ${escapeHtml(w)}</span>
                   `).join('')}
                 </div>
               ` : ''}
@@ -1086,7 +971,7 @@
         </div>
         
         ${attachments.some(a => a.warnings.length > 0) ? `
-          <div style="margin-top:0.5rem;font-size:0.7rem;color:#ef4444;font-style:italic;">
+          <div class="eml-danger-note">
             ⚠️ Dangerous attachment types detected. Do not open without verification.
           </div>
         ` : ''}
@@ -1105,25 +990,19 @@
                         xHeaders.priority || xHeaders.other.length > 0;
     
     if (!hasXHeaders) {
-      container.style.display = "none";
+      container.classList.add("hidden");
       return;
     }
     
-    container.style.display = "block";
+    container.classList.remove("hidden");
     
     let content = `
-      <div style="
-        background:#020617;
-        border-radius:0.6rem;
-        border:1px solid rgba(148,163,184,0.35);
-        padding:0.75rem 0.9rem;
-        margin-bottom:1rem;
-      ">
-        <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+      <div class="section-card mb-5">
+        <div class="section-card-header">
           🔍 X-Headers Analysis
         </div>
         
-        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+        <div class="flex-col gap-3">
     `;
     
     // Spam Score

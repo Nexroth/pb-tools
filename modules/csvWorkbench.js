@@ -553,12 +553,12 @@
 
         <!-- Row 1: Load button + inline drop zone -->
         <div class="csv-load-row">
-          <button class="btn btn-secondary" id="csvFileButton" style="padding:0.3rem 0.7rem;font-size:0.75rem;flex-shrink:0;">
+          <button class="btn btn-sm" id="csvFileButton">
             📂 Load file
           </button>
-          <input type="file" id="csvFileInput" accept=".csv,.txt,.xlsx" style="display:none">
+          <input type="file" id="csvFileInput" accept=".csv,.txt,.xlsx" class="hidden">
           <div class="csv-dropzone" id="csvDropzone">
-            <span class="dropzone-icon">⬇</span>
+            <span class="dropzone-icon" style="font-size:1.25rem;">⬇</span>
             <span class="dropzone-label">Drop a <strong>CSV</strong> or <strong>XLSX</strong> file here to load or merge</span>
           </div>
         </div>
@@ -567,13 +567,13 @@
         <div class="csv-infobar" id="csvInfoBar">
           <div class="csv-file-info" id="csvFileInfo"></div>
           <div class="csv-toolbar-actions">
-            <button class="btn btn-secondary" id="csvUndoBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;" disabled title="Undo last operation">
+            <button class="btn btn-secondary btn-sm" id="csvUndoBtn" disabled title="Undo last operation">
               ↩ Undo
             </button>
-            <button class="btn btn-secondary" id="csvDownloadBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;" disabled>
+            <button class="btn btn-secondary btn-sm" id="csvDownloadBtn" disabled>
               ↓ CSV
             </button>
-            <button class="btn" id="exportOpenButton" style="padding:0.3rem 0.65rem;font-size:0.75rem;">
+            <button class="btn btn-sm" id="exportOpenButton">
               Export…
             </button>
           </div>
@@ -605,8 +605,8 @@
           <div class="ops-rail" id="opsRail">
             ${Object.entries(PANEL_ICONS).map(([key, icon]) => `
               <button class="rail-btn" data-panel="${key}" title="${PANEL_LABELS[key]}">
-                ${icon}
-                <span class="rail-tooltip">${PANEL_LABELS[key]}</span>
+                <span class="rail-icon">${icon}</span>
+                <span class="rail-label">${PANEL_LABELS[key]}</span>
               </button>
             `).join("")}
           </div>

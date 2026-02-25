@@ -70,20 +70,14 @@
     `;
 
     wrapper.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:1rem;padding-left:1.2rem;padding-right:1rem;padding-bottom:0.5rem;">
+      <div class="module-content-wrapper" style="padding-left:1.2rem;">
         <!-- CSV Upload Section -->
-        <div style="
-          background:#020617;
-          border-radius:0.6rem;
-          border:1px solid rgba(148,163,184,0.35);
-          padding:0.75rem 0.9rem;
-          margin-bottom:1rem;
-        ">
-          <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+        <div class="section-card mb-5">
+          <div class="section-card-header">
             1. Load Recipient Data
           </div>
           
-          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+          <div class="flex items-center gap-3 flex-wrap mb-3">
             <button class="btn" id="emailCsvButton">
               Choose CSV file
             </button>
@@ -91,63 +85,49 @@
               type="file"
               id="emailCsvInput"
               accept=".csv,.txt"
-              style="display:none"
+              class="hidden"
             >
-            <span id="emailCsvInfo" style="font-size:0.8rem;color:#9ca3af;"></span>
+            <span id="emailCsvInfo" class="info-text"></span>
           </div>
 
-          <div id="emailAvailableFields" style="display:none;margin-top:0.5rem;">
-            <div style="font-size:0.75rem;color:#9ca3af;margin-bottom:0.25rem;">
+          <div id="emailAvailableFields" class="hidden mt-3">
+            <div class="info-text-sm mb-1">
               Available variables (click to copy):
             </div>
-            <div id="emailFieldsList" style="display:flex;flex-wrap:wrap;gap:0.35rem;"></div>
+            <div id="emailFieldsList" class="flex flex-wrap gap-2"></div>
           </div>
         </div>
 
         <!-- Template Editor Section -->
-        <div style="
-          background:#020617;
-          border-radius:0.6rem;
-          border:1px solid rgba(148,163,184,0.35);
-          padding:0.75rem 0.9rem;
-          margin-bottom:1rem;
-        ">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-            <div style="font-weight:600;font-size:0.9rem;">
+        <div class="section-card mb-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="section-card-title">
               2. Create Template
             </div>
-            <div style="display:flex;gap:0.35rem;">
-              <button class="btn btn-secondary" id="emailSaveTemplateBtn" style="padding:0.25rem 0.6rem;font-size:0.75rem;">
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-sm" id="emailSaveTemplateBtn">
                 Save Template
               </button>
-              <button class="btn btn-secondary" id="emailLoadTemplateBtn" style="padding:0.25rem 0.6rem;font-size:0.75rem;">
+              <button class="btn btn-secondary btn-sm" id="emailLoadTemplateBtn">
                 Load Template
               </button>
             </div>
           </div>
 
-          <div style="margin-bottom:0.75rem;">
-            <label style="font-size:0.75rem;color:#9ca3af;display:block;margin-bottom:0.25rem;">
+          <div class="mb-4">
+            <label class="form-label">
               Subject Line:
             </label>
             <input
               type="text"
               id="emailSubjectInput"
               placeholder="e.g., Security Alert for {{FirstName}} {{LastName}}"
-              style="
-                width:100%;
-                padding:0.5rem;
-                border-radius:0.4rem;
-                border:1px solid rgba(148,163,184,0.4);
-                background:#020617;
-                color:#e5e7eb;
-                font-size:0.85rem;
-              "
+              class="form-input"
             >
           </div>
 
           <div>
-            <label style="font-size:0.75rem;color:#9ca3af;display:block;margin-bottom:0.25rem;">
+            <label class="form-label">
               Message Body:
             </label>
             <textarea
@@ -160,100 +140,72 @@ Use {{VariableName}} to insert data from your CSV.
 
 Best regards,
 Security Team"
-              style="
-                width:100%;
-                min-height:200px;
-                padding:0.75rem;
-                border-radius:0.4rem;
-                border:1px solid rgba(148,163,184,0.4);
-                background:#020617;
-                color:#e5e7eb;
-                font-family:system-ui,sans-serif;
-                font-size:0.85rem;
-                resize:vertical;
-              "
+              class="form-textarea"
+              style="min-height:200px;"
             ></textarea>
-            <div style="margin-top:0.5rem;">
-              <button class="btn btn-secondary" id="emailInsertTableBtn" style="padding:0.3rem 0.6rem;font-size:0.75rem;">
+            <div class="mt-3">
+              <button class="btn btn-secondary btn-sm" id="emailInsertTableBtn">
                 Insert Table Template
               </button>
             </div>
           </div>
 
-          <div style="margin-top:0.5rem;font-size:0.7rem;color:#6b7280;">
+          <div class="hint-text mt-3">
             💡 Use {{FieldName}} to insert variables. Field names are case-sensitive. Tables are supported for professional formatting.
           </div>
         </div>
 
         <!-- Quick Fill Section (for single recipient) -->
-        <div id="emailQuickFillSection" style="
-          background:#020617;
-          border-radius:0.6rem;
-          border:1px solid rgba(148,163,184,0.35);
-          padding:0.75rem 0.9rem;
-          margin-bottom:1rem;
-          display:none;
-        ">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-            <div style="font-weight:600;font-size:0.9rem;">
+        <div id="emailQuickFillSection" class="section-card mb-5 hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div class="section-card-title">
               Quick Fill (Single Recipient)
             </div>
-            <button class="btn btn-secondary" id="emailClearQuickFillBtn" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+            <button class="btn btn-secondary btn-xs" id="emailClearQuickFillBtn">
               Clear All
             </button>
           </div>
           
-          <div style="font-size:0.75rem;color:#9ca3af;margin-bottom:0.5rem;">
+          <div class="info-text-sm mb-3">
             Fill in values below to preview without loading CSV:
           </div>
           
-          <div id="emailQuickFillInputs" style="display:flex;flex-direction:column;gap:0.5rem;">
+          <div id="emailQuickFillInputs" class="flex-col gap-3">
             <!-- Dynamic inputs will be added here -->
           </div>
         </div>
 
         <!-- Preview Section -->
-        <div style="
-          background:#020617;
-          border-radius:0.6rem;
-          border:1px solid rgba(148,163,184,0.35);
-          padding:0.75rem 0.9rem;
-          margin-bottom:1rem;
-        ">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
-            <div style="font-weight:600;font-size:0.9rem;">
+        <div class="section-card mb-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="section-card-title">
               3. Preview
             </div>
-            <div id="emailPreviewNav" style="display:none;align-items:center;gap:0.35rem;font-size:0.75rem;">
-              <button class="btn btn-secondary" id="emailPreviewPrev" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+            <div id="emailPreviewNav" class="hidden items-center gap-2">
+              <button class="btn btn-secondary btn-xs" id="emailPreviewPrev">
                 ◀
               </button>
-              <span id="emailPreviewCounter" style="color:#9ca3af;"></span>
-              <button class="btn btn-secondary" id="emailPreviewNext" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+              <span id="emailPreviewCounter" class="info-text-sm"></span>
+              <button class="btn btn-secondary btn-xs" id="emailPreviewNext">
                 ▶
               </button>
             </div>
           </div>
 
           <div id="emailPreviewContent">
-            <div style="font-size:0.8rem;color:#9ca3af;text-align:center;padding:2rem;">
+            <div class="info-text" style="text-align:center;padding:2rem;">
               Load CSV data and create a template to see preview
             </div>
           </div>
         </div>
 
         <!-- Export Section -->
-        <div style="
-          background:#020617;
-          border-radius:0.6rem;
-          border:1px solid rgba(148,163,184,0.35);
-          padding:0.75rem 0.9rem;
-        ">
-          <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">
+        <div class="section-card">
+          <div class="section-card-header">
             4. Export
           </div>
           
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <div class="flex gap-3 flex-wrap">
             <button class="btn" id="emailOpenClientBtn" disabled title="Opens mailto: link (text only, no HTML)">
               Open in Email Client
             </button>
@@ -271,7 +223,7 @@ Security Team"
             </button>
           </div>
           
-          <div style="margin-top:0.5rem;font-size:0.7rem;color:#6b7280;">
+          <div class="hint-text mt-3">
             💡 "Open in Email Client" sends text only. For HTML tables, use "Copy as HTML" then paste into Outlook/Gmail.
           </div>
         </div>
@@ -471,38 +423,29 @@ Security Team"
 
     // Hide section if no variables or if CSV is loaded
     if (variables.length === 0 || csvData) {
-      quickFillSection.style.display = "none";
+      quickFillSection.classList.remove("block");
+      quickFillSection.classList.add("hidden");
       return;
     }
 
     // Show section and create inputs
-    quickFillSection.style.display = "block";
+    quickFillSection.classList.remove("hidden");
+    quickFillSection.classList.add("block");
     quickFillInputs.innerHTML = "";
 
     variables.forEach((varName) => {
       const inputGroup = document.createElement("div");
-      inputGroup.style.display = "flex";
-      inputGroup.style.flexDirection = "column";
-      inputGroup.style.gap = "0.25rem";
+      inputGroup.className = "flex-col gap-1";
 
       const label = document.createElement("label");
       label.textContent = varName;
-      label.style.fontSize = "0.75rem";
-      label.style.color = "#9ca3af";
-      label.style.fontWeight = "500";
+      label.className = "form-label";
 
       const input = document.createElement("input");
       input.type = "text";
       input.value = quickFillValues[varName] || "";
       input.placeholder = `Enter ${varName}...`;
-      input.style.cssText = `
-        padding: 0.4rem 0.5rem;
-        border-radius: 0.4rem;
-        border: 1px solid rgba(148,163,184,0.4);
-        background: #020617;
-        color: #e5e7eb;
-        font-size: 0.85rem;
-      `;
+      input.className = "form-input";
 
       input.addEventListener("input", (e) => {
         quickFillValues[varName] = e.target.value;
@@ -575,33 +518,14 @@ Security Team"
 
     if (!fieldsContainer || !fieldsList) return;
 
-    fieldsContainer.style.display = "block";
+    fieldsContainer.classList.remove("hidden");
+    fieldsContainer.classList.add("block");
     fieldsList.innerHTML = "";
 
     csvData.fields.forEach((field) => {
       const badge = document.createElement("button");
       badge.textContent = `{{${field}}}`;
-      badge.style.cssText = `
-        padding: 0.25rem 0.5rem;
-        border-radius: 999px;
-        border: 1px solid rgba(148,163,184,0.4);
-        background: rgba(15,23,42,0.9);
-        color: #e5e7eb;
-        font-size: 0.7rem;
-        font-family: ui-monospace, monospace;
-        cursor: pointer;
-        transition: all 0.15s ease;
-      `;
-
-      badge.addEventListener("mouseenter", () => {
-        badge.style.background = "rgba(29,78,216,0.3)";
-        badge.style.borderColor = "#1d4ed8";
-      });
-
-      badge.addEventListener("mouseleave", () => {
-        badge.style.background = "rgba(15,23,42,0.9)";
-        badge.style.borderColor = "rgba(148,163,184,0.4)";
-      });
+      badge.className = "field-badge";
 
       badge.addEventListener("click", () => {
         copyToClipboard(`{{${field}}}`, badge);
@@ -624,48 +548,43 @@ Security Team"
 
     if (!hasQuickFill && !hasCsvData) {
       previewContent.innerHTML = `
-        <div style="font-size:0.8rem;color:#9ca3af;text-align:center;padding:2rem;">
+        <div class="info-text" style="text-align:center;padding:2rem;">
           ${csvData ? 'Create a template to see preview' : 'Create a template with variables (e.g., {{FirstName}}) to see preview'}
         </div>
       `;
-      if (previewNav) previewNav.style.display = "none";
+      if (previewNav) {
+        previewNav.classList.remove("flex");
+        previewNav.classList.add("hidden");
+      }
       return;
     }
 
     // Quick Fill mode (single recipient)
     if (hasQuickFill) {
-      if (previewNav) previewNav.style.display = "none";
+      if (previewNav) {
+        previewNav.classList.remove("flex");
+        previewNav.classList.add("hidden");
+      }
 
       const mergedSubject = mergeTemplate(currentTemplate.subject, quickFillValues);
       const mergedBody = mergeTemplate(currentTemplate.body, quickFillValues);
 
       previewContent.innerHTML = `
-        <div style="
-          background:rgba(15,23,42,0.9);
-          border-radius:0.5rem;
-          padding:0.75rem;
-          border:1px solid rgba(31,41,55,0.8);
-        ">
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.7rem;color:#9ca3af;margin-bottom:0.25rem;">
+        <div class="preview-box">
+          <div class="mb-4">
+            <div class="preview-label">
               SUBJECT:
             </div>
-            <div style="font-size:0.85rem;color:#e5e7eb;font-weight:500;">
+            <div class="preview-value">
               ${escapeHtml(mergedSubject || "(No subject)")}
             </div>
           </div>
           
           <div>
-            <div style="font-size:0.7rem;color:#9ca3af;margin-bottom:0.25rem;">
+            <div class="preview-label">
               BODY:
             </div>
-            <div style="
-              font-size:0.85rem;
-              color:#e5e7eb;
-              ${containsHtmlTable(mergedBody) ? '' : 'white-space:pre-wrap;'}
-              font-family:system-ui,sans-serif;
-              line-height:1.5;
-            ">
+            <div class="preview-body ${containsHtmlTable(mergedBody) ? '' : 'preview-body-plain'}">
               ${containsHtmlTable(mergedBody) ? sanitizeHtml(mergedBody.replace(/\n/g, '<br>')) : escapeHtml(mergedBody || "(No body)")}
             </div>
           </div>
@@ -677,7 +596,10 @@ Security Team"
     // CSV mode (multiple recipients)
     if (hasCsvData) {
       // Show navigation
-      if (previewNav) previewNav.style.display = "flex";
+      if (previewNav) {
+        previewNav.classList.remove("hidden");
+        previewNav.classList.add("flex");
+      }
       if (previewCounter) {
         previewCounter.textContent = `${previewIndex + 1} of ${csvData.rows.length}`;
       }
@@ -688,32 +610,21 @@ Security Team"
       const mergedBody = mergeTemplate(currentTemplate.body, row);
 
       previewContent.innerHTML = `
-        <div style="
-          background:rgba(15,23,42,0.9);
-          border-radius:0.5rem;
-          padding:0.75rem;
-          border:1px solid rgba(31,41,55,0.8);
-        ">
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.7rem;color:#9ca3af;margin-bottom:0.25rem;">
+        <div class="preview-box">
+          <div class="mb-4">
+            <div class="preview-label">
               SUBJECT:
             </div>
-            <div style="font-size:0.85rem;color:#e5e7eb;font-weight:500;">
+            <div class="preview-value">
               ${escapeHtml(mergedSubject || "(No subject)")}
             </div>
           </div>
           
           <div>
-            <div style="font-size:0.7rem;color:#9ca3af;margin-bottom:0.25rem;">
+            <div class="preview-label">
               BODY:
             </div>
-            <div style="
-              font-size:0.85rem;
-              color:#e5e7eb;
-              ${containsHtmlTable(mergedBody) ? '' : 'white-space:pre-wrap;'}
-              font-family:system-ui,sans-serif;
-              line-height:1.5;
-            ">
+            <div class="preview-body ${containsHtmlTable(mergedBody) ? '' : 'preview-body-plain'}">
               ${containsHtmlTable(mergedBody) ? sanitizeHtml(mergedBody.replace(/\n/g, '<br>')) : escapeHtml(mergedBody || "(No body)")}
             </div>
           </div>

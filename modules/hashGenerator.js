@@ -19,187 +19,149 @@
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    // Setup scrolling container
+    container.style.cssText = `
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      max-height: calc(100vh - 140px) !important;
+      position: relative;
+    `;
+
     container.innerHTML = "";
 
     const wrapper = document.createElement("div");
-    wrapper.className = "module-card";
+    wrapper.className = "hash-generator-wrapper";
+    wrapper.style.cssText = `
+      width: 100%;
+      height: auto;
+      display: block;
+      overflow: visible;
+    `;
 
     wrapper.innerHTML = `
-      <div style="padding:0.5rem 0;">
-        <!-- Input mode toggle -->
-        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
-          <button class="btn btn-secondary" id="hashModeFile" data-mode="file">
-            📄 File
-          </button>
-          <button class="btn btn-secondary" id="hashModeText" data-mode="text">
-            📝 Text
-          </button>
+      <div class="module-content-wrapper">
+        <!-- Mode Toggle Section -->
+        <div class="section-card mb-5">
+          <div class="flex gap-3">
+            <button class="btn btn-secondary" id="hashModeFile" data-mode="file">
+              📄 File
+            </button>
+            <button class="btn btn-secondary" id="hashModeText" data-mode="text">
+              📝 Text
+            </button>
+          </div>
         </div>
 
         <!-- File input panel -->
-        <div id="hashFilePanel" style="display:block;">
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
-            <button class="btn" id="hashChooseFileBtn">
-              Choose file
-            </button>
-            <input
-              type="file"
-              id="hashFileInput"
-              style="display:none"
-            >
-            <span id="hashFileInfo" style="font-size:0.8rem;color:#9ca3af;"></span>
-          </div>
-
-          <div
-            id="hashDropzone"
-            class="dropzone"
-            style="
-              padding:2rem 1.5rem;
-              min-height:140px;
-              display:flex;
-              flex-direction:column;
-              align-items:center;
-              justify-content:center;
-              gap:0.5rem;
-              cursor:pointer;
-              transition:all 0.2s ease;
-            "
-          >
-            <div style="font-size:2.5rem;opacity:0.6;">📄</div>
-            <div style="font-size:0.95rem;font-weight:500;color:#e5e7eb;">
-              Drop file here to generate hashes
+        <div id="hashFilePanel" class="block">
+          <div class="section-card mb-5">
+            <div class="section-card-header">
+              Upload File
             </div>
-            <div style="font-size:0.75rem;color:#6b7280;">
-              or click "Choose file" above • Any file type accepted
+            
+            <div class="flex items-center gap-3 mb-4">
+              <button class="btn" id="hashChooseFileBtn">
+                Choose file
+              </button>
+              <input
+                type="file"
+                id="hashFileInput"
+                class="hidden"
+              >
+              <span id="hashFileInfo" class="info-text"></span>
+            </div>
+
+            <div id="hashDropzone" class="dropzone">
+              <div class="dropzone-icon">📄</div>
+              <div class="dropzone-text">
+                Drop file here to generate hashes
+              </div>
+              <div class="dropzone-hint">
+                or click "Choose file" above • Any file type accepted
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Text input panel -->
-        <div id="hashTextPanel" style="display:none;">
-          <textarea
-            id="hashTextInput"
-            placeholder="Paste or type text to hash..."
-            style="
-              width:100%;
-              min-height:150px;
-              padding:0.75rem;
-              border-radius:0.6rem;
-              border:1px solid rgba(148,163,184,0.4);
-              background:#020617;
-              color:#e5e7eb;
-              font-family:ui-monospace,monospace;
-              font-size:0.85rem;
-              resize:vertical;
-            "
-          ></textarea>
-          <div style="margin-top:0.5rem;display:flex;gap:0.5rem;">
-            <button class="btn" id="hashTextBtn">
-              Generate hashes
-            </button>
-            <button class="btn btn-secondary" id="hashClearTextBtn">
-              Clear
-            </button>
+        <div id="hashTextPanel" class="hidden">
+          <div class="section-card mb-5">
+            <div class="section-card-header">
+              Text Input
+            </div>
+            
+            <textarea
+              id="hashTextInput"
+              placeholder="Paste or type text to hash..."
+              class="form-textarea form-input-mono"
+              style="min-height:150px;"
+            ></textarea>
+            <div class="flex gap-3 mt-3">
+              <button class="btn" id="hashTextBtn">
+                Generate hashes
+              </button>
+              <button class="btn btn-secondary" id="hashClearTextBtn">
+                Clear
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Results panel -->
-        <div id="hashResultsPanel" style="margin-top:1.5rem;display:none;">
-          <div style="
-            background:#020617;
-            border-radius:0.6rem;
-            border:1px solid rgba(148,163,184,0.35);
-            padding:0.75rem 0.9rem;
-          ">
-            <div style="
-              display:flex;
-              align-items:center;
-              justify-content:space-between;
-              margin-bottom:0.5rem;
-            ">
-              <div style="font-weight:600;font-size:0.9rem;">Hash Results</div>
-              <button class="btn btn-secondary" id="hashClearResultsBtn" style="padding:0.25rem 0.6rem;font-size:0.75rem;">
+        <div id="hashResultsPanel" class="hidden">
+          <div class="section-card">
+            <div class="flex items-center justify-between mb-3">
+              <div class="section-card-title">Hash Results</div>
+              <button class="btn btn-secondary btn-sm" id="hashClearResultsBtn">
                 Clear
               </button>
             </div>
 
-            <div id="hashInputInfo" style="font-size:0.75rem;color:#9ca3af;margin-bottom:0.75rem;"></div>
+            <div id="hashInputInfo" class="info-text-sm mb-4"></div>
 
-            <div style="display:flex;flex-direction:column;gap:0.5rem;">
+            <div class="flex-col gap-3">
               <!-- MD5 -->
               <div class="hash-result-row">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem;">
+                <div class="flex items-center justify-between mb-1">
                   <span style="font-weight:600;font-size:0.8rem;color:#22c55e;">MD5</span>
-                  <button class="btn btn-secondary hash-copy-btn" data-hash-type="md5" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+                  <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="md5">
                     Copy
                   </button>
                 </div>
-                <div class="hash-value" id="hashMd5" style="
-                  font-family:ui-monospace,monospace;
-                  font-size:0.75rem;
-                  color:#e5e7eb;
-                  background:rgba(15,23,42,0.9);
-                  padding:0.4rem 0.5rem;
-                  border-radius:0.4rem;
-                  word-break:break-all;
-                "></div>
+                <div class="result-box" id="hashMd5"></div>
               </div>
 
               <!-- SHA-1 -->
               <div class="hash-result-row">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem;">
+                <div class="flex items-center justify-between mb-1">
                   <span style="font-weight:600;font-size:0.8rem;color:#3b82f6;">SHA-1</span>
-                  <button class="btn btn-secondary hash-copy-btn" data-hash-type="sha1" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+                  <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="sha1">
                     Copy
                   </button>
                 </div>
-                <div class="hash-value" id="hashSha1" style="
-                  font-family:ui-monospace,monospace;
-                  font-size:0.75rem;
-                  color:#e5e7eb;
-                  background:rgba(15,23,42,0.9);
-                  padding:0.4rem 0.5rem;
-                  border-radius:0.4rem;
-                  word-break:break-all;
-                "></div>
+                <div class="result-box" id="hashSha1"></div>
               </div>
 
               <!-- SHA-256 -->
               <div class="hash-result-row">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem;">
+                <div class="flex items-center justify-between mb-1">
                   <span style="font-weight:600;font-size:0.8rem;color:#f59e0b;">SHA-256</span>
-                  <button class="btn btn-secondary hash-copy-btn" data-hash-type="sha256" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+                  <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="sha256">
                     Copy
                   </button>
                 </div>
-                <div class="hash-value" id="hashSha256" style="
-                  font-family:ui-monospace,monospace;
-                  font-size:0.75rem;
-                  color:#e5e7eb;
-                  background:rgba(15,23,42,0.9);
-                  padding:0.4rem 0.5rem;
-                  border-radius:0.4rem;
-                  word-break:break-all;
-                "></div>
+                <div class="result-box" id="hashSha256"></div>
               </div>
 
               <!-- SHA-512 -->
               <div class="hash-result-row">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem;">
+                <div class="flex items-center justify-between mb-1">
                   <span style="font-weight:600;font-size:0.8rem;color:#8b5cf6;">SHA-512</span>
-                  <button class="btn btn-secondary hash-copy-btn" data-hash-type="sha512" style="padding:0.2rem 0.5rem;font-size:0.7rem;">
+                  <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="sha512">
                     Copy
                   </button>
                 </div>
-                <div class="hash-value" id="hashSha512" style="
-                  font-family:ui-monospace,monospace;
-                  font-size:0.75rem;
-                  color:#e5e7eb;
-                  background:rgba(15,23,42,0.9);
-                  padding:0.4rem 0.5rem;
-                  border-radius:0.4rem;
-                  word-break:break-all;
-                "></div>
+                <div class="result-box" id="hashSha512"></div>
               </div>
             </div>
           </div>
@@ -223,15 +185,19 @@
     const textPanel = rootEl.querySelector("#hashTextPanel");
 
     fileModeBtn.addEventListener("click", () => {
-      filePanel.style.display = "block";
-      textPanel.style.display = "none";
+      filePanel.classList.remove("hidden");
+      filePanel.classList.add("block");
+      textPanel.classList.remove("block");
+      textPanel.classList.add("hidden");
       fileModeBtn.style.background = "#1d4ed8";
       textModeBtn.style.background = "#111827";
     });
 
     textModeBtn.addEventListener("click", () => {
-      filePanel.style.display = "none";
-      textPanel.style.display = "block";
+      filePanel.classList.remove("block");
+      filePanel.classList.add("hidden");
+      textPanel.classList.remove("hidden");
+      textPanel.classList.add("block");
       textModeBtn.style.background = "#1d4ed8";
       fileModeBtn.style.background = "#111827";
     });
@@ -558,7 +524,8 @@
 
     if (!resultsPanel || !currentHashes || !currentInput) return;
 
-    resultsPanel.style.display = "block";
+    resultsPanel.classList.remove("hidden");
+    resultsPanel.classList.add("block");
 
     if (inputInfo) {
       inputInfo.textContent = `Source: ${currentInput.name} (${formatBytes(currentInput.size)})`;
@@ -580,7 +547,10 @@
     const fileInfo = rootEl.querySelector("#hashFileInfo");
     const textInput = rootEl.querySelector("#hashTextInput");
 
-    if (resultsPanel) resultsPanel.style.display = "none";
+    if (resultsPanel) {
+      resultsPanel.classList.remove("block");
+      resultsPanel.classList.add("hidden");
+    }
     if (fileInfo) fileInfo.textContent = "";
     if (textInput) textInput.value = "";
 
