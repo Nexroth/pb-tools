@@ -349,6 +349,7 @@
       
       // Find where "phish_alert" appears
       const phishAlertPos = content.indexOf('phish_alert');
+      console.log("phish_alert position:", phishAlertPos);
       
       if (phishAlertPos === -1) {
         console.log("No phish_alert found, trying generic .eml search");
@@ -363,6 +364,7 @@
         const afterFilename = content.substring(emlFilenamePos);
         const base64Pos = afterFilename.indexOf('Content-Transfer-Encoding: base64');
         
+        console.log("Found base64 declaration at offset:", base64Pos);
         
         if (base64Pos !== -1) {
           // Find the start of actual base64 content (after the blank line)
@@ -372,6 +374,7 @@
           const doubleNewlineMatch = afterBase64Header.match(/base64\s*[\r\n]+\s*[\r\n]+/);
           
           if (doubleNewlineMatch) {
+            console.log("Found double newline after base64 header");
             const base64Start = base64Pos + doubleNewlineMatch.index + doubleNewlineMatch[0].length;
             const base64Section = afterFilename.substring(base64Start);
             
@@ -1634,6 +1637,9 @@
       messageId: parsedHeaders["message-id"] || "(not found)",
       returnPath: parsedHeaders["return-path"] || "(not found)",
       
+      // PhishER info (if applicable)
+      phisherInfo: phisherInfo,
+      
       // Authentication
       spf: parsedHeaders["received-spf"] || "(not found)",
       dkim: parsedHeaders["authentication-results"] || "(not found)",
@@ -2028,6 +2034,55 @@
       color: #991b1b;
     }
     
+    .phisher-banner {
+      background: rgba(147, 51, 234, 0.1);
+      border: 2px solid rgba(147, 51, 234, 0.5);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    
+    .phisher-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #a855f7;
+      margin-bottom: 0.75rem;
+    }
+    
+    .phisher-subtitle {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 1rem;
+    }
+    
+    .phisher-status {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-top: 0.5rem;
+    }
+    
+    .phisher-status.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    
+    .phisher-status.failed {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    
+    .embedded-email-marker {
+      background: rgba(245, 158, 11, 0.1);
+      border-left: 4px solid #f59e0b;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+      font-weight: 600;
+      color: #92400e;
+    }
+    
     .report-footer {
       background: #f9fafb;
       padding: 1.5rem 2rem;
@@ -2060,6 +2115,43 @@
     </div>
     
     <div class="report-body">
+      ${analysisResults.phisherInfo && analysisResults.phisherInfo.reporter ? `
+      <!-- PhishER Report Info -->
+      <div class="section">
+        <div class="phisher-banner">
+          <div class="phisher-title">📨 PHISHER REPORT DETECTED</div>
+          <div class="phisher-subtitle">
+            This email was reported as phishing through KnowBe4 PhishER. 
+            ${analysisResults.phisherInfo.extractionSuccess 
+              ? 'The analysis below shows the <strong>embedded phishing email</strong>, not the reporting wrapper.' 
+              : '<strong style="color:#ef4444;">⚠️ Extraction failed</strong> - analyzing reporting wrapper instead.'}
+          </div>
+          <div class="info-grid">
+            <div class="info-label">Reported by:</div>
+            <div class="info-value">${escapeHtml(analysisResults.phisherInfo.reporter)}</div>
+            
+            <div class="info-label">Reported to:</div>
+            <div class="info-value">${escapeHtml(analysisResults.phisherInfo.reportedTo)}</div>
+            
+            <div class="info-label">Report date:</div>
+            <div class="info-value">${escapeHtml(analysisResults.phisherInfo.reportedDate)}</div>
+            
+            <div class="info-label">Extraction:</div>
+            <div class="info-value">
+              <span class="phisher-status ${analysisResults.phisherInfo.extractionSuccess ? 'success' : 'failed'}">
+                ${analysisResults.phisherInfo.extractionSuccess ? '✓ Success' : '✗ Failed'}
+              </span>
+            </div>
+          </div>
+        </div>
+        ${analysisResults.phisherInfo.extractionSuccess ? `
+          <div class="embedded-email-marker">
+            🚨 EMBEDDED PHISHING EMAIL ANALYSIS:
+          </div>
+        ` : ''}
+      </div>
+      ` : ''}
+      
       <!-- Automated Analysis -->
       <div class="section">
         <h2 class="section-title">1. Automated Analysis</h2>
@@ -2156,15 +2248,27 @@
       <div class="section">
         <h2 class="section-title">6. Routing Path (${analysisResults.receivedHeaders.length} hops)</h2>
         ${analysisResults.receivedHeaders.slice().reverse().map((hop, index) => {
-          const { ip, server } = extractIpAndServer(hop);
+          const hopData = extractIpAndServer(hop);
           const isFirstHop = index === 0;
           const hopAuthData = isFirstHop ? hopAuth : { status: 'relay', checks: [] };
+          
+          // Extract protocol info from the header
+          const protocolMatch = hop.match(/with\s+([A-Z][A-Z0-9\/.-]*)/i);
+          const protocol = protocolMatch ? protocolMatch[1] : null;
+          
+          // Extract HELO/EHLO info
+          const heloMatch = hop.match(/(?:HELO|EHLO)\s+([^\s)]+)/i);
+          const helo = heloMatch ? heloMatch[1] : null;
           
           return `
           <div class="hop-item ${hopAuthData.status}">
             <div class="hop-title">Hop ${index + 1} of ${analysisResults.receivedHeaders.length} ${isFirstHop ? '(Original Sender)' : '(Relay)'}</div>
-            ${server ? `<div class="hop-detail">🌐 Server: ${escapeHtml(server)}</div>` : ''}
-            ${ip ? `<div class="hop-detail">📍 IP: ${escapeHtml(ip)}</div>` : ''}
+            ${hopData.fromServer ? `<div class="hop-detail">🖥️ From: ${escapeHtml(hopData.fromServer)}</div>` : ''}
+            ${hopData.byServer ? `<div class="hop-detail">🌐 To: ${escapeHtml(hopData.byServer)}</div>` : ''}
+            ${hopData.ip ? `<div class="hop-detail">📍 IP: ${escapeHtml(hopData.ip)}</div>` : ''}
+            ${hopData.timestamp ? `<div class="hop-detail">⏰ Time: ${escapeHtml(hopData.timestamp)}</div>` : ''}
+            ${protocol ? `<div class="hop-detail">🔒 Protocol: ${escapeHtml(protocol)}</div>` : ''}
+            ${helo ? `<div class="hop-detail">📝 HELO: ${escapeHtml(helo)}</div>` : ''}
             
             ${isFirstHop && hopAuthData.checks.length > 0 ? `
               <div class="hop-auth">
