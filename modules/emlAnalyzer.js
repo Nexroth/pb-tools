@@ -558,8 +558,8 @@
     // Extract links from body
     parsedHeaders.links = extractLinks(bodyText);
     
-    // Extract attachments
-    parsedHeaders.attachments = extractAttachments(content);
+    // Extract attachments (FIXED: use actualEmailContent to get embedded email's attachments)
+    parsedHeaders.attachments = extractAttachments(actualEmailContent);
     
     // Decode subject if encoded
     if (parsedHeaders.subject) {
@@ -1662,6 +1662,10 @@
 
   function analyzeEmailVerdict() {
     // Run the same analysis logic as renderAnalysis()
+    // Check if this appears to be a forwarded email
+    const receivedCount = (parsedHeaders.receivedHeaders || []).length;
+    const isForwarded = receivedCount > 2; // More than 2 hops suggests forwarding
+    
     const issues = [];
     let verdict = "LEGITIMATE";
     let verdictColor = "#22c55e";
@@ -1704,20 +1708,56 @@
       issues.push("✓ SPF passed");
     }
 
-    // Check 3: DKIM
+    // Check 3: DKIM (FIXED - now checks for missing DKIM)
+    const dkim = parsedHeaders["dkim-signature"] || "";
     const authResults = (parsedHeaders["authentication-results"] || "").toLowerCase();
-    if (authResults.includes("dkim=fail")) {
+    
+    if (!dkim && !authResults.includes("dkim=pass")) {
+      issues.push("⚠️ DKIM signature missing or not verified");
+      if (verdict === "LEGITIMATE") {
+        verdict = "SUSPICIOUS";
+        verdictColor = "#f59e0b";
+        borderColor = "rgba(245, 158, 11, 0.5)";
+        bgColor = "rgba(245, 158, 11, 0.05)";
+        confidence = "Medium";
+      }
+    } else if (authResults.includes("dkim=pass")) {
+      issues.push("✓ DKIM signature valid");
+    } else if (authResults.includes("dkim=fail")) {
       issues.push("❌ DKIM authentication failed");
       verdict = "LIKELY SPOOFING";
       verdictColor = "#ef4444";
       borderColor = "rgba(239, 68, 68, 0.5)";
       bgColor = "rgba(239, 68, 68, 0.05)";
       confidence = "High";
-    } else if (authResults.includes("dkim=pass")) {
-      issues.push("✓ DKIM passed");
     }
 
-    // Check 4: Links
+    // Check 4: DMARC (ADDED - was missing)
+    if (authResults.includes("dmarc=fail")) {
+      issues.push("❌ DMARC authentication failed");
+      verdict = "LIKELY SPOOFING";
+      verdictColor = "#ef4444";
+      borderColor = "rgba(239, 68, 68, 0.5)";
+      bgColor = "rgba(239, 68, 68, 0.05)";
+    } else if (authResults.includes("dmarc=pass")) {
+      issues.push("✓ DMARC passed");
+    }
+
+    // Check 5: Message-ID domain matches From domain (ADDED - was missing)
+    const messageId = parsedHeaders["message-id"] || "";
+    const messageIdDomain = extractDomain(messageId);
+    
+    if (fromDomain && messageIdDomain && fromDomain !== messageIdDomain) {
+      issues.push("⚠️ Message-ID domain doesn't match sender domain");
+      if (verdict === "LEGITIMATE") {
+        verdict = "SUSPICIOUS";
+        verdictColor = "#f59e0b";
+        borderColor = "rgba(245, 158, 11, 0.5)";
+        bgColor = "rgba(245, 158, 11, 0.05)";
+      }
+    }
+
+    // Check 6: Links
     const links = parsedHeaders.links || [];
     const suspiciousLinks = links.filter(link => 
       link.isSuspicious || link.isIpBased || link.isShortened
@@ -1732,7 +1772,7 @@
       }
     }
 
-    // Check 5: Dangerous attachments
+    // Check 7: Dangerous attachments
     const attachments = parsedHeaders.attachments || [];
     const dangerousAttachments = attachments.filter(att => att.isDangerous);
     if (dangerousAttachments.length > 0) {
@@ -1744,8 +1784,15 @@
       confidence = "High";
     }
 
-    if (issues.length === 0) {
-      issues.push("✓ No obvious security issues detected");
+    // Add forwarding note (ADDED - was missing)
+    if (isForwarded) {
+      issues.push(`ℹ️ Email has ${receivedCount} hops (likely forwarded/reported)`);
+    }
+
+    // If no issues found, add positive notes
+    if (issues.length === 0 || (issues.length === 1 && isForwarded)) {
+      issues.push("✓ No authentication issues detected");
+      issues.push("✓ All available checks passed");
     }
 
     return {
