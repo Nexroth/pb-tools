@@ -395,7 +395,7 @@ body {
 .dropzone {
   border: 2px dashed rgba(148, 163, 184, 0.4);
   border-radius: 0.5rem;
-  padding: 2rem;
+  padding: 1.25rem;
   text-align: center;
   background: rgba(15, 23, 42, 0.4);
   cursor: pointer;
@@ -409,7 +409,7 @@ body {
 }
 
 .dropzone-icon {
-  font-size: 2rem;
+  font-size: 1.5rem;
   margin-bottom: 0.5rem;
   opacity: 0.6;
 }
@@ -1955,4 +1955,105 @@ body {
   color: #cbd5e1;
   cursor: pointer;
 }
-.join-import-row input[type="checkbox"] { accent-color: #22c55e; cursor: pointer; }
+.join-import-row input[type="checkbox"] { accent-color: #22c55e; cursor: pointer; }/* Note Keys Panel Styles */
+.note-keys-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid rgba(148, 163, 184, 0.2);
+}
+
+.note-keys-tab {
+  padding: 0.5rem 1rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-bottom: -2px;
+}
+
+.note-keys-tab:hover {
+  color: #d1d5db;
+}
+
+.note-keys-tab.active {
+  color: #a78bfa;
+  border-bottom-color: #a78bfa;
+}
+
+.note-keys-content {
+  padding-top: 0.5rem;
+}
+
+.note-key-preview {
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.875rem;
+  color: #d1d5db;
+}
+
+.note-key-preview code {
+  background: rgba(30, 41, 59, 0.8);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  font-family: 'Monaco', 'Courier New', monospace;
+  color: #a78bfa;
+  font-size: 0.8125rem;
+}
+
+.note-key-status {
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.note-config-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  transition: all 0.2s;
+}
+
+.note-config-card:hover {
+  border-color: rgba(148, 163, 184, 0.4);
+  background: rgba(30, 41, 59, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.note-config-card.active {
+  border-color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+}
+
+.note-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.note-config-name {
+  font-weight: 600;
+  color: #e5e7eb;
+  font-size: 0.9375rem;
+}
+
+.note-config-details {
+  margin-bottom: 0.75rem;
+}
+
+.note-config-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

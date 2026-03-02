@@ -20,6 +20,8 @@
     { value: "doughnut",     label: "Doughnut" },
     { value: "radar",        label: "Radar" },
     { value: "polarArea",    label: "Polar Area" },
+    { value: "scatter",      label: "Scatter" },
+    { value: "bubble",       label: "Bubble" },
   ];
 
   // Colour palette — enough for 20 distinct segments
@@ -69,19 +71,28 @@
     const values  = data.map(d => d.value);
     const colors  = labels.map((_, i) => PALETTE[i % PALETTE.length]);
 
-    const isIndexed = ["bar","line","radar","polarArea"].includes(type);
+    const isIndexed = ["bar","line","radar","polarArea","scatter","bubble"].includes(type);
     const realType  = type === "horizontalBar" ? "bar" : type;
+
+    // For scatter/bubble, convert categorical data to x/y coordinates
+    const isScatterType = ["scatter", "bubble"].includes(type);
+    const chartData = isScatterType 
+      ? values.map((y, i) => ({ x: i, y, r: type === "bubble" ? Math.sqrt(y) * 2 : undefined }))
+      : values;
 
     const config = {
       type: realType,
       data: {
-        labels,
+        labels: isScatterType ? undefined : labels, // Scatter/bubble don't use labels
         datasets: [{
           label: chartDef.title || "Count",
-          data: values,
+          data: chartData,
           backgroundColor: isIndexed ? colors.map(c => c + "cc") : colors,
           borderColor:     isIndexed ? colors : colors.map(c => c + "99"),
           borderWidth: 1,
+          pointBackgroundColor: isScatterType ? colors : undefined,
+          pointBorderColor: isScatterType ? colors.map(c => c + "99") : undefined,
+          pointRadius: type === "scatter" ? 6 : undefined,
         }],
       },
       options: {
@@ -100,9 +111,25 @@
             font:    { size: 14, weight: "600" },
             padding: { bottom: 10 },
           },
+          tooltip: isScatterType ? {
+            callbacks: {
+              label: function(context) {
+                const index = context.parsed.x;
+                const label = labels[index] || 'Unknown';
+                const value = context.parsed.y;
+                return `${label}: ${value}`;
+              }
+            }
+          } : undefined,
         },
         scales: isIndexed ? {
-          x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,0.06)" } },
+          x: { 
+            ticks: { 
+              color: "#9ca3af",
+              callback: isScatterType ? (val, index) => labels[index] || val : undefined
+            }, 
+            grid: { color: "rgba(255,255,255,0.06)" } 
+          },
           y: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,0.06)" } },
         } : undefined,
       },
@@ -262,6 +289,10 @@ ${chartsHtml}
                 <option value="10" selected>Top 10</option>
                 <option value="15">Top 15</option>
                 <option value="20">Top 20</option>
+                <option value="25">Top 25</option>
+                <option value="30">Top 30</option>
+                <option value="50">Top 50</option>
+                <option value="100">Top 100</option>
               </select>
             </div>
 

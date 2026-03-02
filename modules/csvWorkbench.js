@@ -3,22 +3,17 @@
 // Business logic is unchanged; only the render layer is redesigned.
 
 (function () {
-  const CONTAINER_ID  = "moduleContainer";
+  const CONTAINER_ID     = "moduleContainer";
   const ANNOTATION_KEY   = "pbToolsAnnotations";
   const NOTE_COL         = "StatusNote";
-  // Annotation key: Email (unique per person) + Original Due Date (UTC) (scopes to campaign)
-  // Falls back to Employee Number if Email is missing
-  const KEY_COL_PRIMARY   = "Email";
-  const KEY_COL_SECONDARY = "Employee Number";  // raw field name, pre-rename
-  const KEY_COL_DATE      = "Original Due Date (UTC)";
+  const NOTE_CONFIG_KEY  = "pbToolsNoteConfigs";     // Note key configurations
+  const ACTIVE_CONFIG_KEY = "pbToolsActiveNoteConfig"; // Currently active config ID
 
-  // Columns that are read-only — unique identifiers that should never be accidentally edited
-  const PROTECTED_COLS = new Set([
-    "Email",
+  // Protected columns are now determined dynamically based on active note key config
+  // Plus some always-protected columns
+  const ALWAYS_PROTECTED = new Set([
     "Manager Email",
-    "Employee Number",
-    "EmployeeID",                // post-rename alias
-    "Original Due Date (UTC)",   // used as campaign ID for annotation matching
+    "EmployeeID"
   ]);
 
   // ── Module meta ───────────────────────────────────────────────────────────
@@ -50,6 +45,7 @@
     presets:  "Presets",
     mapping:  "Value mapping",
     tools:    "Tools",
+    notekeys: "Note Keys",
   };
 
   const PANEL_ICONS = {
@@ -57,6 +53,7 @@
     presets:  "⚡",
     mapping:  "⇄",
     tools:    "🔧",
+    notekeys: "🔑",
   };
 
   // ── Annotation cache ──────────────────────────────────────────────────────
@@ -77,56 +74,181 @@
     } catch (_) {}
   }
 
-  function makeAnnotationKey(row) {
-    const person = row[KEY_COL_PRIMARY] || row[KEY_COL_SECONDARY];
-    const date   = row[KEY_COL_DATE];
-    if (!person || !date) return null;
-    return `${String(person).trim().toLowerCase()}::${String(date).trim()}`;
+  // ── Note Key Configuration ────────────────────────────────────────────────
+  
+  function loadNoteConfigs() {
+    try {
+      const raw = localStorage.getItem(NOTE_CONFIG_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+  }
+
+  function saveNoteConfigs(configs) {
+    try {
+      localStorage.setItem(NOTE_CONFIG_KEY, JSON.stringify(configs));
+    } catch (_) {}
+  }
+
+  function getActiveNoteConfig() {
+    try {
+      const activeId = localStorage.getItem(ACTIVE_CONFIG_KEY);
+      if (!activeId) return null;
+      const configs = loadNoteConfigs();
+      return configs[activeId] || null;
+    } catch (_) { return null; }
+  }
+
+  function setActiveNoteConfig(configId) {
+    try {
+      if (configId) {
+        localStorage.setItem(ACTIVE_CONFIG_KEY, configId);
+        // Update lastUsed timestamp
+        const configs = loadNoteConfigs();
+        if (configs[configId]) {
+          configs[configId].lastUsed = new Date().toISOString();
+          saveNoteConfigs(configs);
+        }
+      } else {
+        localStorage.removeItem(ACTIVE_CONFIG_KEY);
+      }
+    } catch (_) {}
+  }
+
+  function detectKeyColumns(headers) {
+    const detected = { primary: null, secondary: null, context: null };
+    
+    // Detect primary (person/entity identifier)
+    const primaryPatterns = ['email', 'username', 'employee_id', 'user_id', 'account'];
+    for (const pattern of primaryPatterns) {
+      const match = headers.find(h => h.toLowerCase().includes(pattern));
+      if (match) { detected.primary = match; break; }
+    }
+    
+    // Detect secondary (fallback identifier)
+    const secondaryPatterns = ['employee number', 'employeenumber', 'phone', 'id'];
+    for (const pattern of secondaryPatterns) {
+      const match = headers.find(h => 
+        h.toLowerCase().replace(/\s/g, '').includes(pattern.replace(/\s/g, '')) && 
+        h !== detected.primary
+      );
+      if (match) { detected.secondary = match; break; }
+    }
+    
+    // Detect context (cohort/batch)
+    const contextPatterns = ['due date', 'duedate', 'campaign', 'batch', 'quarter', 'enrolled'];
+    for (const pattern of contextPatterns) {
+      const match = headers.find(h => h.toLowerCase().replace(/\s/g, '').includes(pattern.replace(/\s/g, '')));
+      if (match) { detected.context = match; break; }
+    }
+    
+    return detected;
+  }
+
+  function makeAnnotationKey(row, rowIndex = null) {
+    const activeConfig = getActiveNoteConfig();
+    
+    // Persistent mode (config with key columns)
+    if (activeConfig?.keyColumns) {
+      const { primary, secondary, context } = activeConfig.keyColumns;
+      const person = row[primary] || (secondary ? row[secondary] : null);
+      
+      if (!person) return null;
+      
+      const personKey = String(person).trim().toLowerCase();
+      
+      // Include context if available
+      if (context && row[context]) {
+        return `${personKey}::${String(row[context]).trim()}`;
+      }
+      
+      return personKey;
+    }
+    
+    // Temporary mode (no config) - use row index
+    if (rowIndex !== null) {
+      return `temp_${rowIndex}`;
+    }
+    
+    return null;
+  }
+
+  function getProtectedColumns() {
+    const protected = new Set(ALWAYS_PROTECTED);
+    const activeConfig = getActiveNoteConfig();
+    
+    if (activeConfig?.keyColumns) {
+      const { primary, secondary, context } = activeConfig.keyColumns;
+      if (primary) protected.add(primary);
+      if (secondary) protected.add(secondary);
+      if (context) protected.add(context);
+    }
+    
+    return protected;
+  }
+
+  function getNoteCountForConfig(configId) {
+    const notes = loadAnnotations();
+    return Object.values(notes).filter(n => n.configId === configId).length;
+  }
+
+  function deleteNoteConfig(configId) {
+    const configs = loadNoteConfigs();
+    const notes = loadAnnotations();
+    
+    // Delete all notes for this config
+    Object.keys(notes).forEach(key => {
+      if (notes[key].configId === configId) {
+        delete notes[key];
+      }
+    });
+    
+    // Delete the config
+    delete configs[configId];
+    
+    // Save
+    saveNoteConfigs(configs);
+    annotationsCache = notes;
+    saveAnnotations();
+    
+    // Clear active if it was this config
+    const activeId = localStorage.getItem(ACTIVE_CONFIG_KEY);
+    if (activeId === configId) {
+      localStorage.removeItem(ACTIVE_CONFIG_KEY);
+    }
+  }
+
+  function exportConfigNotesAsCSV(configId, configName) {
+    const notes = loadAnnotations();
+    const configNotes = Object.entries(notes)
+      .filter(([key, note]) => note.configId === configId);
+    
+    if (configNotes.length === 0) {
+      alert('No notes to export for this configuration.');
+      return;
+    }
+    
+    const csv = [
+      ['Key', 'Note', 'Created', 'Updated'],
+      ...configNotes.map(([key, note]) => [
+        key,
+        note.text || '',
+        note.createdAt || '',
+        note.updatedAt || ''
+      ])
+    ].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${configName.replace(/[^a-z0-9]/gi, '_')}_notes_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // ── Presets ───────────────────────────────────────────────────────────────
-  const presets = {
-    phisherLike: {
-      id: "phisherLike",
-      label: "PhishER Fail Export",
-      description: "Filters to core identity columns, renames Employee Number → EmployeeID, normalizes SBU values, and derives SBU from Location for blank rows.",
-      keepFields: [
-        "Email", "First Name", "Last Name", "Job Title",
-        "Group", "Manager Name", "Manager Email", "Location",
-        "Employee Number", "Content", "Department", "Custom Field 1",
-      ],
-      renameFields: { "Employee Number": "EmployeeID", "Custom Field 1": "SBU" },
-      // Step 1: explicit value mappings on Custom Field 1 (raw field name, before rename)
-      valueMapping: {
-        "Custom Field 1": {
-          "2101 Centerstone of Indiana*": "Indiana",
-          // add more explicit SBU mappings here as needed
-        },
-      },
-      // Step 2: if SBU still blank, derive from first 2 chars of Location field
-      locationPrefixToSbu: {
-        "TN": "Tennessee",
-        "IN": "Indiana",
-        "IL": "Illinois",
-        "FL": "Florida",
-        "KY": "Kentucky",
-        "OH": "Ohio",
-        "GA": "Georgia",
-        "NC": "North Carolina",
-        "TX": "Texas",
-        "MO": "Missouri",
-        "VA": "Virginia",
-        "CO": "Colorado",
-        "AZ": "Arizona",
-        "CA": "California",
-        "WA": "Washington",
-        "PA": "Pennsylvania",
-        "NY": "New York",
-      },
-      // Step 3: if Location prefix also unknown, fall back to this
-      sbuFallbackForEmpty: "blank",
-    },
-  };
+  // Built-in presets removed - users can create their own custom presets
+  const presets = {};
 
   // ── Undo ─────────────────────────────────────────────────────────────────
 
@@ -188,59 +310,9 @@
     });
   }
 
-  function applyPhisherLikePreset() {
-    if (!parsedData) return;
-    saveUndoSnapshot();
-    const preset    = presets.phisherLike;
-    const keepSet   = new Set(preset.keepFields);
-    const effective = parsedData.fields.filter(f => keepSet.has(f));
+  // applyPhisherLikePreset() function removed - was for hardcoded preset
+  // Users can now create custom presets with their own field selections and mappings
 
-    viewState.visibleFields = effective;
-
-    // Ensure all keepFields have a display name entry
-    preset.keepFields.forEach(f => {
-      if (!viewState.displayNames[f]) viewState.displayNames[f] = f;
-    });
-
-    // Apply renames
-    Object.entries(preset.renameFields || {}).forEach(([from, to]) => {
-      if (viewState.displayNames[from] !== undefined) viewState.displayNames[from] = to;
-    });
-
-    // Step 1: explicit value mappings (runs on raw field name before rename)
-    applyValueMappings(preset.valueMapping);
-
-    // Step 2 & 3: for rows where SBU is still blank, derive from Location prefix
-    const sbuKey      = parsedData.fields.includes("Custom Field 1") ? "Custom Field 1"
-                      : parsedData.fields.includes("SBU") ? "SBU" : null;
-    const locationKey = parsedData.fields.includes("Location") ? "Location" : null;
-
-    if (sbuKey) {
-      const locMap = preset.locationPrefixToSbu || {};
-      parsedData.rows.forEach(row => {
-        const v = row[sbuKey];
-        const isEmpty = v === null || v === undefined || String(v).trim() === "";
-        if (!isEmpty) return;
-
-        // Step 2: try to derive from Location
-        if (locationKey) {
-          const loc    = String(row[locationKey] || "").trim();
-          const prefix = loc.substring(0, 2).toUpperCase();
-          if (prefix && locMap[prefix]) {
-            row[sbuKey] = locMap[prefix];
-            return;
-          }
-        }
-
-        // Step 3: fallback
-        row[sbuKey] = preset.sbuFallbackForEmpty;
-      });
-    }
-
-    viewState.activePreset = preset.id;
-    lastSummary = null;
-    sortState   = { field: null, dir: "asc" };
-  }
 
   function computeGroupAndCount(field) {
     if (!parsedData) return null;
@@ -351,10 +423,13 @@
     if (!fields.includes(NOTE_COL)) fields.push(NOTE_COL);
 
     const annotations = loadAnnotations();
-    rawRows.forEach(row => {
+    rawRows.forEach((row, index) => {
       if (row[NOTE_COL] === undefined) row[NOTE_COL] = "";
-      const key = makeAnnotationKey(row);
-      if (key && annotations[key]?.statusNote) row[NOTE_COL] = annotations[key].statusNote;
+      const key = makeAnnotationKey(row, index);
+      if (key && annotations[key]) {
+        const noteData = annotations[key];
+        row[NOTE_COL] = noteData.text || noteData.statusNote || "";  // Handle both old and new format
+      }
     });
 
     parsedData  = { fields, rows: rawRows };
@@ -551,19 +626,26 @@
     container.innerHTML = `
       <div class="csv-module">
 
-        <!-- Row 1: Load button + inline drop zone -->
-        <div class="csv-load-row">
-          <button class="btn btn-sm" id="csvFileButton">
-            📂 Load file
-          </button>
+        <!-- Row 1: Dropzone only -->
+        <div class="section-card" style="margin-bottom: 1rem;">
+          <div class="section-card-header">
+            Load Data File
+          </div>
+          
           <input type="file" id="csvFileInput" accept=".csv,.txt,.xlsx" class="hidden">
-          <div class="csv-dropzone" id="csvDropzone">
-            <span class="dropzone-icon" style="font-size:1.25rem;">⬇</span>
-            <span class="dropzone-label">Drop a <strong>CSV</strong> or <strong>XLSX</strong> file here to load or merge</span>
+
+          <div class="dropzone" id="csvDropzone">
+            <div class="dropzone-icon">📊</div>
+            <div class="dropzone-text">
+              Drop CSV or XLSX file here or click to browse
+            </div>
+            <div class="dropzone-hint">
+              Supports .csv, .txt, and .xlsx files
+            </div>
           </div>
         </div>
 
-        <!-- Row 2: File info + preset badge + export actions -->
+        <!-- Row 2: File info (left) + actions (right) -->
         <div class="csv-infobar" id="csvInfoBar">
           <div class="csv-file-info" id="csvFileInfo"></div>
           <div class="csv-toolbar-actions">
@@ -648,20 +730,24 @@
     const root = document.getElementById(CONTAINER_ID);
     if (!root) return;
 
-    // File picker
-    const fileBtn   = root.querySelector("#csvFileButton");
+    // File input (triggered by dropzone click)
     const fileInput = root.querySelector("#csvFileInput");
-    if (fileBtn && fileInput) {
-      fileBtn.addEventListener("click", () => { fileInput.value = ""; fileInput.click(); });
+    if (fileInput) {
       fileInput.addEventListener("change", e => {
         const f = e.target.files?.[0];
         if (f) handleFile(f);
       });
     }
 
-    // Drop zone — drag and drop only, no click
+    // Drop zone — drag and drop + click to browse
     const dz = root.querySelector("#csvDropzone");
     if (dz) {
+      dz.addEventListener("click", () => {
+        if (fileInput) {
+          fileInput.value = "";
+          fileInput.click();
+        }
+      });
       dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("dragover"); });
       dz.addEventListener("dragleave", e => { e.preventDefault(); dz.classList.remove("dragover"); });
       dz.addEventListener("drop", e => {
@@ -824,6 +910,7 @@
       case "columns":  buildColumnsPanel(body);  break;
       case "presets":  buildPresetsPanel(body);  break;
       case "mapping":  buildMappingPanel(body);  break;
+      case "notekeys": buildNoteKeysPanel(body); break;
       case "tools":    buildToolsPanel(body);    break;
     }
   }
@@ -1052,52 +1139,7 @@
     const userPresets = loadUserPresets();
     const allUserPresets = Object.values(userPresets).sort((a,b) => b.savedAt - a.savedAt);
 
-    // ── BUILT-IN PRESETS ────────────────────────────────────────────────────
-    const builtinSection = panelSection("BUILT-IN PRESETS");
-    Object.values(presets).forEach(p => {
-      const row = document.createElement("div");
-      row.className = "preset-list-row";
-
-      const nameEl = document.createElement("div");
-      nameEl.className   = "preset-list-name";
-      nameEl.textContent = p.label;
-      if (viewState.activePreset === p.id) nameEl.classList.add("active");
-
-      const descEl = document.createElement("div");
-      descEl.className   = "preset-list-desc";
-      descEl.textContent = p.description;
-
-      row.appendChild(nameEl);
-      row.appendChild(descEl);
-
-      if (parsedData) {
-        const actions = document.createElement("div");
-        actions.className = "preset-list-actions";
-
-        const applyBtn = document.createElement("button");
-        applyBtn.className   = "btn btn-ghost preset-apply-btn";
-        applyBtn.textContent = viewState.activePreset === p.id ? "✓ Applied" : "Apply";
-        applyBtn.disabled    = viewState.activePreset === p.id;
-        applyBtn.addEventListener("click", () => {
-          if (p.id === "phisherLike") applyPhisherLikePreset();
-          updateFileInfo();
-          renderTablePreview();
-          renderSummaryPanel();
-          renderDrawerPanel("presets");
-        });
-        actions.appendChild(applyBtn);
-        row.appendChild(actions);
-      }
-
-      builtinSection.appendChild(row);
-    });
-    container.appendChild(builtinSection);
-
-    // ── USER PRESETS ─────────────────────────────────────────────────────────
-    const divider1 = document.createElement("div");
-    divider1.className = "panel-divider";
-    container.appendChild(divider1);
-
+    // ── MY PRESETS ───────────────────────────────────────────────────────────
     const userSection = panelSection("MY PRESETS");
 
     if (allUserPresets.length === 0) {
@@ -1792,6 +1834,493 @@
     container.appendChild(applyBtn);
   }
 
+  // Note Keys panel
+  function buildNoteKeysPanel(container) {
+    const activeConfig = getActiveNoteConfig();
+    const allConfigs = loadNoteConfigs();
+    const configCount = Object.keys(allConfigs).length;
+    
+    // Tab container
+    const tabContainer = document.createElement("div");
+    tabContainer.className = "note-keys-tabs";
+    
+    const configureTab = document.createElement("button");
+    configureTab.className = "note-keys-tab active";
+    configureTab.textContent = "Configure";
+    
+    const manageTab = document.createElement("button");
+    manageTab.className = "note-keys-tab";
+    manageTab.textContent = `Manage Configs (${configCount})`;
+    
+    tabContainer.appendChild(configureTab);
+    tabContainer.appendChild(manageTab);
+    container.appendChild(tabContainer);
+    
+    // Tab content container
+    const tabContent = document.createElement("div");
+    tabContent.className = "note-keys-content";
+    container.appendChild(tabContent);
+    
+    // Build Configure Tab
+    function buildConfigureTab() {
+      tabContent.innerHTML = "";
+      
+      // Info section
+      const infoSection = panelSection("WHAT ARE STATUSNOTES?");
+      const infoText = document.createElement("div");
+      infoText.className = "panel-hint";
+      infoText.textContent = "StatusNotes let you add notes to rows that persist across CSV loads. Configure key columns to identify the same rows in different files.";
+      infoSection.appendChild(infoText);
+      tabContent.appendChild(infoSection);
+      
+      const divider1 = document.createElement("div");
+      divider1.className = "panel-divider";
+      tabContent.appendChild(divider1);
+      
+      // Configure section
+      const configSection = panelSection("CONFIGURE KEY COLUMNS");
+      
+      if (!parsedData) {
+        const hint = document.createElement("div");
+        hint.className = "panel-hint";
+        hint.style.padding = "1rem";
+        hint.style.textAlign = "center";
+        hint.style.color = "#f59e0b";
+        hint.innerHTML = "<strong>⚠️ No CSV loaded</strong><br><br>Load a CSV file first, then return here to configure note persistence.";
+        configSection.appendChild(hint);
+        tabContent.appendChild(configSection);
+        return;
+      }
+      
+      // Auto-detect and show suggestion
+      const detected = detectKeyColumns(parsedData.fields);
+      
+      const hint = document.createElement("div");
+      hint.className = "panel-hint";
+      hint.style.marginBottom = "0.75rem";
+      hint.innerHTML = "Choose columns that uniquely identify rows. <strong>Without key columns, notes are temporary</strong> (lost on refresh). With key columns, notes persist permanently.";
+      configSection.appendChild(hint);
+      
+      // Config name
+      const nameLabel = document.createElement("label");
+      nameLabel.className = "panel-label";
+      nameLabel.textContent = "Configuration Name:";
+      configSection.appendChild(nameLabel);
+      
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.className = "panel-input";
+      nameInput.id = "noteKeyConfigName";
+      nameInput.placeholder = "e.g., Q1 2026 Training";
+      nameInput.value = activeConfig?.name || "";
+      configSection.appendChild(nameInput);
+      
+      // Primary column
+      const primaryLabel = document.createElement("label");
+      primaryLabel.className = "panel-label";
+      primaryLabel.style.marginTop = "0.75rem";
+      primaryLabel.textContent = "Primary Identifier (required):";
+      configSection.appendChild(primaryLabel);
+      
+      const primarySelect = document.createElement("select");
+      primarySelect.className = "panel-select";
+      primarySelect.id = "noteKeyPrimary";
+      
+      const primaryPlaceholder = document.createElement("option");
+      primaryPlaceholder.value = "";
+      primaryPlaceholder.textContent = "Select column...";
+      primarySelect.appendChild(primaryPlaceholder);
+      
+      parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = viewState.displayNames[f] || f;
+        if (f === detected.primary || f === activeConfig?.keyColumns?.primary) {
+          opt.selected = true;
+        }
+        primarySelect.appendChild(opt);
+      });
+      configSection.appendChild(primarySelect);
+      
+      if (detected.primary) {
+        const autoHint = document.createElement("div");
+        autoHint.className = "panel-hint";
+        autoHint.style.color = "#10b981";
+        autoHint.style.marginTop = "0.25rem";
+        autoHint.textContent = `✓ Auto-detected: ${detected.primary}`;
+        configSection.appendChild(autoHint);
+      }
+      
+      // Secondary column
+      const secondaryLabel = document.createElement("label");
+      secondaryLabel.className = "panel-label";
+      secondaryLabel.style.marginTop = "0.75rem";
+      secondaryLabel.textContent = "Fallback Identifier (optional):";
+      configSection.appendChild(secondaryLabel);
+      
+      const secondarySelect = document.createElement("select");
+      secondarySelect.className = "panel-select";
+      secondarySelect.id = "noteKeySecondary";
+      
+      const secondaryPlaceholder = document.createElement("option");
+      secondaryPlaceholder.value = "";
+      secondaryPlaceholder.textContent = "(none)";
+      secondarySelect.appendChild(secondaryPlaceholder);
+      
+      parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = viewState.displayNames[f] || f;
+        if (f === detected.secondary || f === activeConfig?.keyColumns?.secondary) {
+          opt.selected = true;
+        }
+        secondarySelect.appendChild(opt);
+      });
+      configSection.appendChild(secondarySelect);
+      
+      if (detected.secondary) {
+        const autoHint = document.createElement("div");
+        autoHint.className = "panel-hint";
+        autoHint.style.color = "#10b981";
+        autoHint.style.marginTop = "0.25rem";
+        autoHint.textContent = `✓ Auto-detected: ${detected.secondary}`;
+        configSection.appendChild(autoHint);
+      }
+      
+      // Context column
+      const contextLabel = document.createElement("label");
+      contextLabel.className = "panel-label";
+      contextLabel.style.marginTop = "0.75rem";
+      contextLabel.textContent = "Campaign/Batch ID (optional):";
+      configSection.appendChild(contextLabel);
+      
+      const contextSelect = document.createElement("select");
+      contextSelect.className = "panel-select";
+      contextSelect.id = "noteKeyContext";
+      
+      const contextPlaceholder = document.createElement("option");
+      contextPlaceholder.value = "";
+      contextPlaceholder.textContent = "(none)";
+      contextSelect.appendChild(contextPlaceholder);
+      
+      parsedData.fields.filter(f => f !== NOTE_COL).forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = viewState.displayNames[f] || f;
+        if (f === detected.context || f === activeConfig?.keyColumns?.context) {
+          opt.selected = true;
+        }
+        contextSelect.appendChild(opt);
+      });
+      configSection.appendChild(contextSelect);
+      
+      if (detected.context) {
+        const autoHint = document.createElement("div");
+        autoHint.className = "panel-hint";
+        autoHint.style.color = "#10b981";
+        autoHint.style.marginTop = "0.25rem";
+        autoHint.textContent = `✓ Auto-detected: ${detected.context}`;
+        configSection.appendChild(autoHint);
+      }
+      
+      // Preview
+      const previewBox = document.createElement("div");
+      previewBox.className = "note-key-preview";
+      previewBox.innerHTML = `<strong>Preview:</strong> <code id="noteKeyPreview">Select columns to see preview</code>`;
+      previewBox.style.marginTop = "0.75rem";
+      configSection.appendChild(previewBox);
+      
+      // Update preview function
+      function updatePreview() {
+        const primary = primarySelect.value;
+        const secondary = secondarySelect.value;
+        const context = contextSelect.value;
+        const previewEl = document.getElementById("noteKeyPreview");
+        
+        if (!previewEl) {
+          console.warn("Preview element not found");
+          return;
+        }
+        
+        if (!primary) {
+          previewEl.textContent = "Select primary column";
+          return;
+        }
+        
+        // Get first row value
+        const firstRow = parsedData.rows[0];
+        if (!firstRow) {
+          previewEl.textContent = "No data rows";
+          return;
+        }
+        
+        const primaryVal = String(firstRow[primary] || "").trim().toLowerCase();
+        const contextVal = context ? String(firstRow[context] || "").trim() : "";
+        
+        if (contextVal) {
+          previewEl.textContent = `${primaryVal}::${contextVal}`;
+        } else {
+          previewEl.textContent = primaryVal;
+        }
+      }
+      
+      primarySelect.addEventListener("change", updatePreview);
+      secondarySelect.addEventListener("change", updatePreview);
+      contextSelect.addEventListener("change", updatePreview);
+      
+      // Protection notice
+      const protectNotice = document.createElement("div");
+      protectNotice.className = "panel-hint";
+      protectNotice.style.marginTop = "0.75rem";
+      protectNotice.style.color = "#6b7280";
+      protectNotice.innerHTML = "🔒 Key columns will be <strong>read-only</strong> to prevent breaking note links.";
+      configSection.appendChild(protectNotice);
+      
+      tabContent.appendChild(configSection);
+      
+      // Call updatePreview AFTER adding to DOM
+      updatePreview();
+      
+      // Save button
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "btn btn-primary";
+      saveBtn.textContent = activeConfig ? "Update Configuration" : "Save Configuration";
+      saveBtn.style.marginTop = "1rem";
+      saveBtn.addEventListener("click", () => {
+        const name = nameInput.value.trim();
+        const primary = primarySelect.value;
+        
+        if (!name) {
+          alert("Please enter a configuration name.");
+          return;
+        }
+        
+        if (!primary) {
+          alert("Please select a primary identifier column.");
+          return;
+        }
+        
+        const configs = loadNoteConfigs();
+        const id = activeConfig?.id || `config_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        configs[id] = {
+          id,
+          name,
+          keyColumns: {
+            primary,
+            secondary: secondarySelect.value || null,
+            context: contextSelect.value || null
+          },
+          createdAt: activeConfig?.createdAt || new Date().toISOString(),
+          lastUsed: new Date().toISOString()
+        };
+        
+        saveNoteConfigs(configs);
+        setActiveNoteConfig(id);
+        
+        // Refresh UI
+        renderDrawerPanel("notekeys");
+        updateFileInfo();
+        renderTablePreview();
+      });
+      tabContent.appendChild(saveBtn);
+      
+      // Current status
+      const divider2 = document.createElement("div");
+      divider2.className = "panel-divider";
+      tabContent.appendChild(divider2);
+      
+      const statusSection = panelSection("CURRENT STATUS");
+      const statusBox = document.createElement("div");
+      statusBox.className = "note-key-status";
+      
+      if (activeConfig) {
+        statusBox.innerHTML = `
+          <div style="color: #10b981; font-weight: 600;">✓ Persistent Mode</div>
+          <div style="margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">
+            Active: ${activeConfig.name}<br>
+            Notes will persist across CSV loads
+          </div>
+        `;
+      } else {
+        statusBox.innerHTML = `
+          <div style="color: #f59e0b; font-weight: 600;">⚠️ Temporary Mode</div>
+          <div style="margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">
+            Notes will be lost on refresh<br>
+            Save a configuration to enable persistence
+          </div>
+        `;
+      }
+      statusSection.appendChild(statusBox);
+      tabContent.appendChild(statusSection);
+    }
+    
+    // Build Manage Tab
+    function buildManageTab() {
+      tabContent.innerHTML = "";
+      
+      const configs = loadNoteConfigs();
+      const configList = Object.values(configs).sort((a, b) => 
+        new Date(b.lastUsed) - new Date(a.lastUsed)
+      );
+      
+      if (configList.length === 0) {
+        const emptySection = panelSection("NO CONFIGURATIONS");
+        const hint = document.createElement("div");
+        hint.className = "panel-hint";
+        hint.textContent = "No saved configurations yet. Use the Configure tab to create one.";
+        emptySection.appendChild(hint);
+        tabContent.appendChild(emptySection);
+        return;
+      }
+      
+      const section = panelSection("SAVED CONFIGURATIONS");
+      
+      configList.forEach(config => {
+        const configCard = document.createElement("div");
+        configCard.className = "note-config-card";
+        if (activeConfig?.id === config.id) {
+          configCard.classList.add("active");
+        }
+        
+        const header = document.createElement("div");
+        header.className = "note-config-header";
+        
+        const nameEl = document.createElement("div");
+        nameEl.className = "note-config-name";
+        nameEl.textContent = config.name;
+        if (activeConfig?.id === config.id) {
+          nameEl.innerHTML += ' <span style="color: #10b981; font-size: 0.875rem;">✓ Active</span>';
+        }
+        header.appendChild(nameEl);
+        
+        configCard.appendChild(header);
+        
+        const details = document.createElement("div");
+        details.className = "note-config-details";
+        
+        const keyInfo = document.createElement("div");
+        keyInfo.style.fontSize = "0.875rem";
+        keyInfo.style.color = "#6b7280";
+        const parts = [];
+        if (config.keyColumns.primary) parts.push(config.keyColumns.primary);
+        if (config.keyColumns.secondary) parts.push(`+ ${config.keyColumns.secondary}`);
+        if (config.keyColumns.context) parts.push(`+ ${config.keyColumns.context}`);
+        keyInfo.textContent = parts.join(" ");
+        details.appendChild(keyInfo);
+        
+        const metadata = document.createElement("div");
+        metadata.style.fontSize = "0.75rem";
+        metadata.style.color = "#9ca3af";
+        metadata.style.marginTop = "0.25rem";
+        
+        const created = new Date(config.createdAt);
+        const lastUsed = new Date(config.lastUsed);
+        const now = new Date();
+        const hoursAgo = Math.floor((now - lastUsed) / (1000 * 60 * 60));
+        const lastUsedText = hoursAgo < 1 ? "Just now" :
+                            hoursAgo < 24 ? `${hoursAgo}h ago` :
+                            `${Math.floor(hoursAgo / 24)}d ago`;
+        
+        const noteCount = getNoteCountForConfig(config.id);
+        metadata.innerHTML = `Created: ${created.toLocaleDateString()} • Last used: ${lastUsedText} • ${noteCount} notes`;
+        details.appendChild(metadata);
+        
+        configCard.appendChild(details);
+        
+        const actions = document.createElement("div");
+        actions.className = "note-config-actions";
+        
+        if (activeConfig?.id !== config.id) {
+          const activateBtn = document.createElement("button");
+          activateBtn.className = "btn btn-ghost btn-sm";
+          activateBtn.textContent = "Make Active";
+          activateBtn.addEventListener("click", () => {
+            setActiveNoteConfig(config.id);
+            renderDrawerPanel("notekeys");
+            updateFileInfo();
+            renderTablePreview();
+          });
+          actions.appendChild(activateBtn);
+        }
+        
+        const exportBtn = document.createElement("button");
+        exportBtn.className = "btn btn-ghost btn-sm";
+        exportBtn.textContent = "Export Notes";
+        exportBtn.addEventListener("click", () => {
+          exportConfigNotesAsCSV(config.id, config.name);
+        });
+        actions.appendChild(exportBtn);
+        
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn btn-ghost btn-sm";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.style.color = "#ef4444";
+        let confirmTimeout = null;
+        let confirming = false;
+        deleteBtn.addEventListener("click", () => {
+          if (!confirming) {
+            confirming = true;
+            deleteBtn.textContent = "Sure? Click again";
+            deleteBtn.style.backgroundColor = "#fee2e2";
+            confirmTimeout = setTimeout(() => {
+              confirming = false;
+              deleteBtn.textContent = "Delete";
+              deleteBtn.style.backgroundColor = "";
+            }, 3000);
+          } else {
+            clearTimeout(confirmTimeout);
+            const noteCount = getNoteCountForConfig(config.id);
+            if (noteCount > 0) {
+              const doExport = confirm(`Delete "${config.name}"?\n\n${noteCount} notes will be deleted.\n\nClick OK to export notes first, or Cancel to delete without exporting.`);
+              if (doExport) {
+                exportConfigNotesAsCSV(config.id, config.name);
+              }
+            }
+            deleteNoteConfig(config.id);
+            renderDrawerPanel("notekeys");
+            updateFileInfo();
+            renderTablePreview();
+          }
+        });
+        actions.appendChild(deleteBtn);
+        
+        configCard.appendChild(actions);
+        section.appendChild(configCard);
+      });
+      
+      tabContent.appendChild(section);
+      
+      // Storage info
+      const storageSection = panelSection("STORAGE");
+      const notes = loadAnnotations();
+      const totalNotes = Object.keys(notes).length;
+      const storageInfo = document.createElement("div");
+      storageInfo.className = "panel-hint";
+      storageInfo.textContent = `Total: ${configList.length} configurations, ${totalNotes} notes`;
+      storageSection.appendChild(storageInfo);
+      tabContent.appendChild(storageSection);
+    }
+    
+    // Tab switching
+    configureTab.addEventListener("click", () => {
+      configureTab.classList.add("active");
+      manageTab.classList.remove("active");
+      buildConfigureTab();
+    });
+    
+    manageTab.addEventListener("click", () => {
+      manageTab.classList.remove("active");
+      configureTab.classList.add("active");
+      manageTab.classList.add("active");
+      configureTab.classList.remove("active");
+      buildManageTab();
+    });
+    
+    // Build initial tab
+    buildConfigureTab();
+  }
+
   // Tools panel
   function buildToolsPanel(container) {
     // Remove duplicates
@@ -1933,9 +2462,10 @@
       if (!col || !op || !parsedData) return;
       saveUndoSnapshot();
 
+      const protectedCols = getProtectedColumns();
       const targetFields = col === "__all__"
-        ? getEffectiveFields().filter(f => f !== NOTE_COL && !PROTECTED_COLS.has(f))
-        : PROTECTED_COLS.has(col) ? [] : [col];
+        ? getEffectiveFields().filter(f => f !== NOTE_COL && !protectedCols.has(f))
+        : protectedCols.has(col) ? [] : [col];
 
       if (targetFields.length === 0) {
         cleanMsg.textContent = "No editable columns selected.";
@@ -2410,10 +2940,14 @@
           if (hasNote) {
             // Clear the note
             if (dataIdx >= 0) parsedData.rows[dataIdx][NOTE_COL] = "";
-            const key = makeAnnotationKey(row);
+            const key = makeAnnotationKey(row, dataIdx);
             if (key) {
               const ann = loadAnnotations();
-              if (ann[key]) { ann[key].statusNote = ""; annotationsCache = ann; saveAnnotations(); }
+              if (ann[key]) { 
+                delete ann[key];  // Delete the entire note entry
+                annotationsCache = ann; 
+                saveAnnotations(); 
+              }
             }
             tr.classList.remove("annotated");
             // Update the note cell in the row visually
@@ -2498,10 +3032,14 @@
         disabled: !hasNote,
         action: () => {
           if (dataIdx >= 0) parsedData.rows[dataIdx][NOTE_COL] = "";
-          const key = makeAnnotationKey(row);
+          const key = makeAnnotationKey(row, dataIdx);
           if (key) {
             const ann = loadAnnotations();
-            if (ann[key]) { ann[key].statusNote = ""; annotationsCache = ann; saveAnnotations(); }
+            if (ann[key]) { 
+              delete ann[key];  // Delete the entire note entry
+              annotationsCache = ann; 
+              saveAnnotations(); 
+            }
           }
           tr.classList.remove("annotated");
           const noteTd = [...tr.querySelectorAll("td")].find(td => td.classList.contains("cell-note"));
@@ -2679,11 +3217,12 @@
       gutterTd.addEventListener("contextmenu", e => showRowContextMenu(e, row, tr, dataIdx, rowIdx));
       tr.appendChild(gutterTd);
 
+      const protectedCols = getProtectedColumns();
       fields.forEach(field => {
         const td  = document.createElement("td");
         const val = row[field];
         const displayVal = val == null ? "" : String(val);
-        const isProtected = PROTECTED_COLS.has(field);
+        const isProtected = protectedCols.has(field);
 
         td.textContent = displayVal;
         if (field === NOTE_COL) td.classList.add("cell-note");
@@ -2722,11 +3261,29 @@
 
             // For StatusNote, also persist annotation
             if (field === NOTE_COL) {
-              const key = makeAnnotationKey(row);
+              const key = makeAnnotationKey(row, dataIdx);
               if (key) {
                 const ann = loadAnnotations();
-                if (!ann[key]) ann[key] = {};
-                ann[key].statusNote = newVal;
+                const activeConfig = getActiveNoteConfig();
+                
+                if (newVal.trim()) {
+                  // Create or update note
+                  if (!ann[key]) {
+                    ann[key] = {
+                      text: newVal,
+                      configId: activeConfig?.id || null,
+                      createdAt: new Date().toISOString(),
+                      updatedAt: new Date().toISOString()
+                    };
+                  } else {
+                    ann[key].text = newVal;
+                    ann[key].updatedAt = new Date().toISOString();
+                  }
+                } else {
+                  // Empty note - delete it
+                  delete ann[key];
+                }
+                
                 annotationsCache = ann;
                 saveAnnotations();
               }
