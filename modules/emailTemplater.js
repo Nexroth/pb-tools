@@ -100,18 +100,14 @@
 
         <!-- Template Editor Section -->
         <div class="section-card mb-5">
+        <div class="section-card mb-5">
           <div class="flex items-center justify-between mb-3">
             <div class="section-card-title">
               2. Create Template
             </div>
-            <div class="flex gap-2">
-              <button class="btn btn-secondary btn-sm" id="emailSaveTemplateBtn">
-                Save Template
-              </button>
-              <button class="btn btn-secondary btn-sm" id="emailLoadTemplateBtn">
-                Load Template
-              </button>
-            </div>
+            <button class="btn btn-secondary btn-sm" id="emailTemplatesBtn">
+              📋 Templates
+            </button>
           </div>
 
           <div class="mb-4">
@@ -349,18 +345,347 @@ Security Team"
     }
 
     // Template management
-    const saveTemplateBtn = rootEl.querySelector("#emailSaveTemplateBtn");
-    const loadTemplateBtn = rootEl.querySelector("#emailLoadTemplateBtn");
 
-    if (saveTemplateBtn) {
-      saveTemplateBtn.addEventListener("click", () => {
-        saveTemplate();
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEMPLATE MANAGER SYSTEM (matches Report Builder)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function openTemplateManager() {
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+    
+    const modalContent = document.createElement("div");
+    modalContent.className = "modal-content";
+    modalContent.style.maxWidth = "600px";
+    
+    const header = document.createElement("div");
+    header.className = "modal-header";
+    const headerTitle = document.createElement("h3");
+    headerTitle.textContent = "Template Manager";
+    headerTitle.style.cssText = "margin: 0; font-size: 1.1rem;";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "modal-close";
+    closeBtn.innerHTML = "×";
+    header.appendChild(headerTitle);
+    header.appendChild(closeBtn);
+    
+    const body = document.createElement("div");
+    body.className = "modal-body";
+    
+    const buttonsRow = document.createElement("div");
+    buttonsRow.style.marginBottom = "1rem";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "btn btn-sm";
+    saveBtn.innerHTML = "💾 Save Current Template";
+    saveBtn.disabled = !currentTemplate.subject && !currentTemplate.body;
+    const importBtn = document.createElement("button");
+    importBtn.className = "btn btn-secondary btn-sm";
+    importBtn.textContent = "📥 Import Template JSON";
+    const importFile = document.createElement("input");
+    importFile.type = "file";
+    importFile.accept = ".json";
+    importFile.style.display = "none";
+    buttonsRow.appendChild(saveBtn);
+    buttonsRow.appendChild(document.createTextNode(" "));
+    buttonsRow.appendChild(importBtn);
+    buttonsRow.appendChild(importFile);
+    
+    const templateCard = document.createElement("div");
+    templateCard.className = "section-card";
+    const cardHeader = document.createElement("div");
+    cardHeader.className = "section-card-header";
+    cardHeader.textContent = "Saved Templates (" + savedTemplates.length + ")";
+    
+    const templateList = document.createElement("div");
+    
+    if (savedTemplates.length === 0) {
+      templateList.innerHTML = '<div class="info-text" style="padding: 1rem; text-align: center; color: var(--text-muted);">No templates saved yet. Create a template and save it to reuse later.</div>';
+    } else {
+      savedTemplates.forEach(function(tmpl) {
+        const item = document.createElement("div");
+        item.className = "template-item";
+        item.dataset.id = tmpl.id;
+        
+        const itemHeader = document.createElement("div");
+        itemHeader.className = "template-item-header";
+        const itemName = document.createElement("div");
+        itemName.className = "template-item-name";
+        itemName.textContent = tmpl.name;
+        const itemActions = document.createElement("div");
+        itemActions.className = "template-item-actions";
+        
+        const loadBtn = document.createElement("button");
+        loadBtn.className = "btn btn-xs btn-ghost tm-load-btn";
+        loadBtn.dataset.id = tmpl.id;
+        loadBtn.textContent = "Load";
+        loadBtn.style.color = "#60a5fa";
+        const exportBtn = document.createElement("button");
+        exportBtn.className = "btn btn-xs btn-ghost tm-export-btn";
+        exportBtn.dataset.id = tmpl.id;
+        exportBtn.textContent = "Export";
+        exportBtn.style.color = "#a78bfa";
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn btn-xs btn-ghost tm-delete-btn";
+        deleteBtn.dataset.id = tmpl.id;
+        deleteBtn.style.color = "#f87171";
+        deleteBtn.textContent = "Delete";
+        
+        itemActions.appendChild(loadBtn);
+        itemActions.appendChild(exportBtn);
+        itemActions.appendChild(deleteBtn);
+        itemHeader.appendChild(itemName);
+        itemHeader.appendChild(itemActions);
+        item.appendChild(itemHeader);
+        
+        if (tmpl.description) {
+          const itemDesc = document.createElement("div");
+          itemDesc.className = "template-item-desc";
+          itemDesc.textContent = tmpl.description;
+          item.appendChild(itemDesc);
+        }
+        
+        const itemMeta = document.createElement("div");
+        itemMeta.className = "template-item-meta";
+        itemMeta.textContent = "Created " + new Date(tmpl.created).toLocaleDateString();
+        item.appendChild(itemMeta);
+        
+        templateList.appendChild(item);
       });
     }
+    
+    templateCard.appendChild(cardHeader);
+    templateCard.appendChild(templateList);
+    body.appendChild(buttonsRow);
+    body.appendChild(templateCard);
+    modalContent.appendChild(header);
+    modalContent.appendChild(body);
+    modal.appendChild(modalContent);
+    
+    document.getElementById("app").appendChild(modal);
 
-    if (loadTemplateBtn) {
-      loadTemplateBtn.addEventListener("click", () => {
-        showLoadTemplateDialog();
+    const closeModal = function() { modal.parentNode.removeChild(modal); };
+    
+    closeBtn.addEventListener("click", closeModal);
+    modal.addEventListener("click", function(e) {
+      if (e.target === modal) closeModal();
+    });
+
+    saveBtn.addEventListener("click", function() {
+      showSaveTemplateDialog(function() {
+        closeModal();
+        openTemplateManager();
+      });
+    });
+
+    importBtn.addEventListener("click", function() {
+      importFile.click();
+    });
+    
+    importFile.addEventListener("change", function(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const imported = importTemplateJson(evt.target.result);
+        if (imported) {
+          closeModal();
+          openTemplateManager();
+        } else {
+          alert("Failed to import template. Check console for details.");
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    templateList.querySelectorAll(".tm-load-btn").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        loadTemplate(btn.dataset.id);
+        closeModal();
+      });
+    });
+
+    templateList.querySelectorAll(".tm-export-btn").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        exportTemplateJson(btn.dataset.id);
+      });
+    });
+
+    templateList.querySelectorAll(".tm-delete-btn").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        if (confirm("Delete this template? This cannot be undone.")) {
+          deleteTemplate(btn.dataset.id);
+          closeModal();
+          openTemplateManager();
+        }
+      });
+    });
+  }
+
+  function showSaveTemplateDialog(onSuccess) {
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+    
+    const modalContent = document.createElement("div");
+    modalContent.className = "modal-content";
+    modalContent.style.maxWidth = "500px";
+    
+    const header = document.createElement("div");
+    header.className = "modal-header";
+    const headerTitle = document.createElement("h3");
+    headerTitle.textContent = "Save Template";
+    headerTitle.style.cssText = "margin: 0; font-size: 1.1rem;";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "modal-close";
+    closeBtn.innerHTML = "×";
+    header.appendChild(headerTitle);
+    header.appendChild(closeBtn);
+    
+    const body = document.createElement("div");
+    body.className = "modal-body";
+    
+    const nameGroup = document.createElement("div");
+    nameGroup.style.marginBottom = "1rem";
+    const nameLabel = document.createElement("label");
+    nameLabel.style.cssText = "display: block; font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;";
+    nameLabel.textContent = "Template Name";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "e.g., Phishing Awareness Campaign";
+    nameInput.style.cssText = "width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-size: 0.9rem; outline: none;";
+    nameInput.setAttribute("autocomplete", "off");
+    nameGroup.appendChild(nameLabel);
+    nameGroup.appendChild(nameInput);
+    
+    const descGroup = document.createElement("div");
+    descGroup.style.marginBottom = "1.5rem";
+    const descLabel = document.createElement("label");
+    descLabel.style.cssText = "display: block; font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;";
+    descLabel.textContent = "Description (optional)";
+    const descInput = document.createElement("textarea");
+    descInput.placeholder = "Brief description of this template...";
+    descInput.style.cssText = "width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem 0.75rem; border-radius: 0.375rem; min-height: 60px; resize: vertical; font-size: 0.9rem; outline: none; font-family: inherit;";
+    descInput.setAttribute("autocomplete", "off");
+    descGroup.appendChild(descLabel);
+    descGroup.appendChild(descInput);
+    
+    const actions = document.createElement("div");
+    actions.style.cssText = "display: flex; gap: 0.5rem; justify-content: flex-end;";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "btn btn-secondary btn-sm";
+    cancelBtn.textContent = "Cancel";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "btn btn-sm";
+    saveBtn.textContent = "Save Template";
+    actions.appendChild(cancelBtn);
+    actions.appendChild(saveBtn);
+    
+    body.appendChild(nameGroup);
+    body.appendChild(descGroup);
+    body.appendChild(actions);
+    modalContent.appendChild(header);
+    modalContent.appendChild(body);
+    modal.appendChild(modalContent);
+    
+    document.getElementById("app").appendChild(modal);
+    nameInput.focus();
+
+    const closeModal = function() { modal.parentNode.removeChild(modal); };
+    
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    modal.addEventListener("click", function(e) {
+      if (e.target === modal) closeModal();
+    });
+
+    saveBtn.addEventListener("click", function() {
+      const name = nameInput.value.trim();
+      if (!name) return;
+
+      const template = {
+        id: Date.now().toString(),
+        name: name,
+        description: descInput.value.trim(),
+        subject: currentTemplate.subject,
+        body: currentTemplate.body,
+        created: new Date().toISOString(),
+      };
+
+      savedTemplates.push(template);
+      saveTemplatesToStorage();
+      
+      closeModal();
+      if (onSuccess) onSuccess();
+    });
+    
+    nameInput.addEventListener("keypress", function(e) {
+      if (e.key === "Enter") saveBtn.click();
+    });
+  }
+
+  function loadTemplate(templateId) {
+    const template = savedTemplates.find(function(t) { return t.id === templateId; });
+    if (!template) return false;
+
+    currentTemplate.subject = template.subject;
+    currentTemplate.body = template.body;
+
+    const subjectInput = rootEl.querySelector("#emailSubjectInput");
+    const bodyInput = rootEl.querySelector("#emailBodyInput");
+
+    if (subjectInput) subjectInput.value = template.subject;
+    if (bodyInput) bodyInput.value = template.body;
+
+    updatePreview();
+    updateExportButtons();
+    
+    return true;
+  }
+
+  function deleteTemplate(templateId) {
+    savedTemplates = savedTemplates.filter(function(t) { return t.id !== templateId; });
+    saveTemplatesToStorage();
+    return true;
+  }
+
+  function exportTemplateJson(templateId) {
+    const template = savedTemplates.find(function(t) { return t.id === templateId; });
+    if (!template) return;
+
+    const json = JSON.stringify(template, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = template.name.replace(/[^a-z0-9]/gi, '_') + "_template.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importTemplateJson(jsonString) {
+    try {
+      const template = JSON.parse(jsonString);
+      if (!template.name || !template.subject) {
+        throw new Error("Invalid template format");
+      }
+      
+      template.id = Date.now().toString();
+      template.created = new Date().toISOString();
+      
+      savedTemplates.push(template);
+      saveTemplatesToStorage();
+      return template;
+    } catch (e) {
+      console.error("Failed to import template:", e);
+      return null;
+    }
+  }
+
+
+    // Template Manager button
+    const templatesBtn = rootEl.querySelector("#emailTemplatesBtn");
+    if (templatesBtn) {
+      templatesBtn.addEventListener("click", () => {
+        openTemplateManager();
       });
     }
 
@@ -472,7 +797,7 @@ Security Team"
       }
     }
 
-    return Array.from(variables).sort();
+    return Array.from(variables);
   }
 
   function handleCsvFile(file) {
@@ -718,56 +1043,6 @@ Security Team"
     if (exportCsvBtn) exportCsvBtn.disabled = !hasCsvData; // CSV export only works with CSV data
   }
 
-  function saveTemplate() {
-    const name = prompt("Enter a name for this template:");
-    if (!name || !name.trim()) return;
-
-    const template = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      subject: currentTemplate.subject,
-      body: currentTemplate.body,
-      created: new Date().toISOString(),
-    };
-
-    savedTemplates.push(template);
-    saveTemplatesToStorage();
-
-    alert(`Template "${name}" saved successfully!`);
-  }
-
-  function showLoadTemplateDialog() {
-    if (savedTemplates.length === 0) {
-      alert("No saved templates found.");
-      return;
-    }
-
-    let message = "Select a template to load:\n\n";
-    savedTemplates.forEach((tmpl, idx) => {
-      message += `${idx + 1}. ${tmpl.name}\n`;
-    });
-
-    const choice = prompt(message + "\nEnter number:");
-    if (!choice) return;
-
-    const idx = parseInt(choice) - 1;
-    if (idx >= 0 && idx < savedTemplates.length) {
-      const template = savedTemplates[idx];
-      currentTemplate.subject = template.subject;
-      currentTemplate.body = template.body;
-
-      const subjectInput = rootEl.querySelector("#emailSubjectInput");
-      const bodyInput = rootEl.querySelector("#emailBodyInput");
-
-      if (subjectInput) subjectInput.value = template.subject;
-      if (bodyInput) bodyInput.value = template.body;
-
-      updatePreview();
-      updateExportButtons();
-
-      alert(`Template "${template.name}" loaded!`);
-    }
-  }
 
   function openInEmailClient() {
     // Only works in Quick Fill mode (single recipient)

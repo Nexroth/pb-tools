@@ -7,12 +7,9 @@
     subtitle: "Build charts from your CSV data and export a shareable HTML report.",
   };
 
-  // Report state — list of chart configs added to the report
-  let reportCharts = []; // [{ id, title, type, field, data: {labels, values} }]
+  let reportCharts = [];
   let reportTitle  = "PB Tools Report";
-  let chartInstances = {}; // canvasId -> Chart instance
-
-  // ── Template Management ───────────────────────────────────────────────────
+  let chartInstances = {};
 
   const TEMPLATE_STORAGE_KEY = "pbTools_reportTemplates";
 
@@ -49,6 +46,8 @@
         field: c.field,
         title: c.title,
         maxGroups: c.maxGroups || 10,
+        note: c.note || "",
+        showLegend: c.showLegend !== false,
       })),
       createdAt: new Date().toISOString(),
     };
@@ -93,6 +92,8 @@
         title: chartConfig.title,
         maxGroups: maxGroups,
         data: chartData,
+        note: chartConfig.note || "",
+        showLegend: chartConfig.showLegend !== false,
       });
     });
 
@@ -141,7 +142,7 @@
     }
   }
 
-function openTemplateManager() {
+  function openTemplateManager() {
     const templates = getTemplates();
     
     const modal = document.createElement("div");
@@ -268,14 +269,14 @@ function openTemplateManager() {
     modalContent.appendChild(body);
     modal.appendChild(modalContent);
     
-    document.body.appendChild(modal);
+    document.getElementById("app").appendChild(modal);
 
     modal.querySelector("#tmCloseBtn").addEventListener("click", function() {
-      document.body.removeChild(modal);
+      modal.parentNode.removeChild(modal);
     });
 
     modal.addEventListener("click", function(e) {
-      if (e.target === modal) document.body.removeChild(modal);
+      if (e.target === modal) modal.parentNode.removeChild(modal);
     });
 
     modal.querySelector("#tmSaveNewBtn").addEventListener("click", function() {
@@ -284,7 +285,7 @@ function openTemplateManager() {
       const description = prompt("Description (optional):") || "";
       const saved = saveAsTemplate(name, description);
       if (saved) {
-        document.body.removeChild(modal);
+        modal.parentNode.removeChild(modal);
         openTemplateManager();
       } else {
         alert("Failed to save template");
@@ -302,7 +303,7 @@ function openTemplateManager() {
       reader.onload = function(evt) {
         const imported = importTemplateJson(evt.target.result);
         if (imported) {
-          document.body.removeChild(modal);
+          modal.parentNode.removeChild(modal);
           openTemplateManager();
         } else {
           alert("Failed to import template. Check console for details.");
@@ -313,7 +314,7 @@ function openTemplateManager() {
 
     modal.querySelectorAll(".tm-load-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
-        if (loadTemplate(btn.dataset.id)) document.body.removeChild(modal);
+        if (loadTemplate(btn.dataset.id)) modal.parentNode.removeChild(modal);
       });
     });
 
@@ -327,14 +328,131 @@ function openTemplateManager() {
       btn.addEventListener("click", function() {
         if (confirm("Delete this template? This cannot be undone.")) {
           deleteTemplate(btn.dataset.id);
-          document.body.removeChild(modal);
+          modal.parentNode.removeChild(modal);
           openTemplateManager();
         }
       });
     });
   }
 
-  // ── Chart Types & Palette ─────────────────────────────────────────────────
+  function openChartEditor(chartId) {
+    const chartDef = reportCharts.find(c => c.id === chartId);
+    if (!chartDef) return;
+
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+    
+    const modalContent = document.createElement("div");
+    modalContent.className = "modal-content";
+    modalContent.style.maxWidth = "500px";
+    
+    const header = document.createElement("div");
+    header.className = "modal-header";
+    const headerTitle = document.createElement("h3");
+    headerTitle.textContent = "Edit Chart";
+    headerTitle.style.cssText = "margin: 0; font-size: 1.1rem; color: #f9fafb;";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "modal-close";
+    closeBtn.id = "editCloseBtn";
+    closeBtn.innerHTML = "×";
+    header.appendChild(headerTitle);
+    header.appendChild(closeBtn);
+    
+    const body = document.createElement("div");
+    body.className = "modal-body";
+    
+    const titleGroup = document.createElement("div");
+    titleGroup.style.marginBottom = "1rem";
+    const titleLabel = document.createElement("label");
+    titleLabel.style.cssText = "display: block; color: #f9fafb; font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;";
+    titleLabel.textContent = "Chart Title";
+    const titleInput = document.createElement("input");
+    titleInput.type = "text";
+    titleInput.id = "editChartTitle";
+    titleInput.setAttribute("autocomplete", "off");
+    titleInput.value = chartDef.title || '';
+    titleInput.placeholder = "e.g., Failures by Department";
+    titleInput.style.cssText = "width: 100%; background: #1e293b; border: 1px solid #334155; color: #f9fafb; padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-size: 0.9rem; outline: none; font-family: inherit; -webkit-text-fill-color: #f9fafb;";
+    titleGroup.appendChild(titleLabel);
+    titleGroup.appendChild(titleInput);
+    
+    const noteGroup = document.createElement("div");
+    noteGroup.style.marginBottom = "1rem";
+    const noteLabel = document.createElement("label");
+    noteLabel.style.cssText = "display: block; color: #f9fafb; font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;";
+    noteLabel.textContent = "Custom Note (optional)";
+    const noteTextarea = document.createElement("textarea");
+    noteTextarea.id = "editChartNote";
+    noteTextarea.setAttribute("autocomplete", "off");
+    noteTextarea.value = chartDef.note || '';
+    noteTextarea.placeholder = "Add context or insights about this chart...";
+    noteTextarea.style.cssText = "width: 100%; background: #1e293b; border: 1px solid #334155; color: #f9fafb; padding: 0.5rem 0.75rem; border-radius: 0.375rem; min-height: 80px; resize: vertical; font-size: 0.9rem; font-family: inherit; outline: none; -webkit-text-fill-color: #f9fafb;";
+    noteGroup.appendChild(noteLabel);
+    noteGroup.appendChild(noteTextarea);
+    
+    const legendGroup = document.createElement("div");
+    legendGroup.style.marginBottom = "1.5rem";
+    const legendLabel = document.createElement("label");
+    legendLabel.style.cssText = "display: flex; align-items: center; color: #f9fafb; font-size: 0.85rem; cursor: pointer;";
+    const legendCheck = document.createElement("input");
+    legendCheck.type = "checkbox";
+    legendCheck.id = "editShowLegend";
+    legendCheck.checked = chartDef.showLegend !== false;
+    legendCheck.style.cssText = "margin-right: 0.5rem; cursor: pointer;";
+    legendLabel.appendChild(legendCheck);
+    legendLabel.appendChild(document.createTextNode("Show legend"));
+    legendGroup.appendChild(legendLabel);
+    
+    const actions = document.createElement("div");
+    actions.style.cssText = "display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "btn btn-secondary btn-sm";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.style.color = "#f9fafb";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "btn btn-sm";
+    saveBtn.textContent = "Save Changes";
+    saveBtn.style.color = "#f9fafb";
+    actions.appendChild(cancelBtn);
+    actions.appendChild(saveBtn);
+    
+    body.appendChild(titleGroup);
+    body.appendChild(noteGroup);
+    body.appendChild(legendGroup);
+    body.appendChild(actions);
+    
+    modalContent.appendChild(header);
+    modalContent.appendChild(body);
+    modal.appendChild(modalContent);
+    
+    document.getElementById("app").appendChild(modal);
+
+    const closeModal = function() { modal.parentNode.removeChild(modal); };
+    
+    closeBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    modal.addEventListener("click", function(e) {
+      if (e.target === modal) closeModal();
+    });
+
+    saveBtn.addEventListener("click", function() {
+      const newTitle = titleInput.value.trim();
+      const newNote = noteTextarea.value.trim();
+      const showLegend = legendCheck.checked;
+      
+      chartDef.title = newTitle || chartDef.fieldLabel || chartDef.field;
+      chartDef.note = newNote;
+      chartDef.showLegend = showLegend;
+      
+      const oldCard = document.querySelector('[data-chart-id="' + chartId + '"]');
+      if (oldCard) {
+        oldCard.remove();
+        renderChartCard(chartDef);
+      }
+      
+      closeModal();
+    });
+  }
 
   const CHART_TYPES = [
     { value: "bar",          label: "Bar" },
@@ -354,8 +472,6 @@ function openTemplateManager() {
     "#2dd4bf","#fb923c","#a3e635","#38bdf8","#c084fc",
     "#4ade80","#facc15","#f472b6","#94a3b8","#fb7185",
   ];
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   function getCsvApi() {
     return window.SecOpsWorkbench?.modules?.csvWorkbench?.api ?? null;
@@ -385,8 +501,6 @@ function openTemplateManager() {
   function uid() {
     return "chart_" + Math.random().toString(36).slice(2, 9);
   }
-
-  // ── Chart rendering ───────────────────────────────────────────────────────
 
   function buildChartConfig(chartDef) {
     const { type, data } = chartDef;
@@ -423,15 +537,11 @@ function openTemplateManager() {
         indexAxis: type === "horizontalBar" ? "y" : "x",
         plugins: {
           legend: {
-            display: !isIndexed,
+            display: chartDef.showLegend !== false ? !isIndexed : false,
             labels: { color: "#e5e7eb", font: { size: 11 } },
           },
           title: {
-            display: !!chartDef.title,
-            text:    chartDef.title,
-            color:   "#f9fafb",
-            font:    { size: 14, weight: "600" },
-            padding: { bottom: 10 },
+            display: false,
           },
           tooltip: isScatterType ? {
             callbacks: {
@@ -473,8 +583,6 @@ function openTemplateManager() {
     chartInstances[canvasId] = new Chart(canvas.getContext("2d"), config);
   }
 
-  // ── Export ────────────────────────────────────────────────────────────────
-
   function exportReportHtml() {
     if (!reportCharts.length) return;
 
@@ -482,10 +590,12 @@ function openTemplateManager() {
       const id     = uid();
       const config = buildChartConfig(chartDef);
       const isPie  = ["pie","doughnut","polarArea","radar"].includes(chartDef.type);
-      return '\n  <div class="chart-card">\n    <h2 class="chart-title">' + escHtml(chartDef.title || "Chart") + '</h2>\n    <p class="chart-meta">Grouped by: <strong>' + escHtml(chartDef.fieldLabel || chartDef.field) + '</strong> &mdash; ' + chartDef.data.length + ' distinct values</p>\n    <div class="chart-wrap ' + (isPie ? "chart-wrap--pie" : "") + '">\n      <canvas id="' + id + '"></canvas>\n    </div>\n  </div>\n  <script>\n    (function(){\n      const ctx = document.getElementById(\'' + id + '\').getContext(\'2d\');\n      new Chart(ctx, ' + JSON.stringify(config) + ');\n    })();\n  <\/script>';
+      const noteHtml = chartDef.note ? '<p class="chart-note">' + escHtml(chartDef.note) + '</p>' : '';
+      
+      return '\n  <div class="chart-card">\n    <h2 class="chart-title">' + escHtml(chartDef.title || "Chart") + '</h2>\n    <p class="chart-meta">Grouped by: <strong>' + escHtml(chartDef.fieldLabel || chartDef.field) + '</strong> &mdash; ' + chartDef.data.length + ' distinct values</p>\n    <div class="chart-wrap ' + (isPie ? "chart-wrap--pie" : "") + '">\n      <canvas id="' + id + '"></canvas>\n    </div>\n    ' + noteHtml + '\n  </div>\n  <script>\n    (function(){\n      const ctx = document.getElementById(\'' + id + '\').getContext(\'2d\');\n      new Chart(ctx, ' + JSON.stringify(config) + ');\n    })();\n  <\/script>';
     }).join("\n");
 
-    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + escHtml(reportTitle) + '</title>\n<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>\n<style>\n  *,*::before,*::after{box-sizing:border-box}\n  body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f9fafb;margin:0;padding:1.5rem 2rem;min-height:100vh}\n  h1{font-size:1.4rem;margin:0 0 0.25rem;font-weight:700}\n  .report-meta{font-size:0.78rem;color:#6b7280;margin-bottom:2rem}\n  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.5rem}\n  .chart-card{background:#1e293b;border-radius:0.75rem;border:1px solid rgba(148,163,184,0.15);padding:1.25rem 1.5rem}\n  .chart-title{font-size:1rem;font-weight:600;margin:0 0 0.2rem;color:#f9fafb}\n  .chart-meta{font-size:0.72rem;color:#6b7280;margin:0 0 1rem}\n  .chart-wrap{position:relative;height:300px}\n  .chart-wrap--pie{height:280px;max-width:380px;margin:0 auto}\n  @media print{\n    body{background:#fff;color:#111;padding:0.5rem}\n    .chart-card{background:#f9fafb;border-color:#e5e7eb;break-inside:avoid}\n    .chart-title,.chart-meta{color:#111}\n    .report-meta{color:#6b7280}\n  }\n</style>\n</head>\n<body>\n<h1>' + escHtml(reportTitle) + '</h1>\n<div class="report-meta">Generated ' + new Date().toLocaleString() + ' &mdash; ' + reportCharts.length + ' chart' + (reportCharts.length !== 1 ? "s" : "") + '</div>\n<div class="charts-grid">\n' + chartsHtml + '\n</div>\n</body>\n</html>';
+    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + escHtml(reportTitle) + '</title>\n<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>\n<style>\n  *,*::before,*::after{box-sizing:border-box}\n  body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f9fafb;margin:0;padding:1.5rem 2rem;min-height:100vh}\n  h1{font-size:1.4rem;margin:0 0 0.25rem;font-weight:700}\n  .report-meta{font-size:0.78rem;color:#6b7280;margin-bottom:2rem}\n  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.5rem}\n  .chart-card{background:#1e293b;border-radius:0.75rem;border:1px solid rgba(148,163,184,0.15);padding:1.25rem 1.5rem}\n  .chart-title{font-size:1rem;font-weight:600;margin:0 0 0.2rem;color:#f9fafb}\n  .chart-meta{font-size:0.72rem;color:#6b7280;margin:0 0 1rem}\n  .chart-wrap{position:relative;height:300px}\n  .chart-wrap--pie{height:280px;max-width:380px;margin:0 auto}\n  .chart-note{background:rgba(167,139,250,0.1);border-left:3px solid #a78bfa;padding:0.75rem 1rem;margin:1rem 0 0;border-radius:0.375rem;font-size:0.85rem;line-height:1.5;color:#9ca3af;font-style:italic}\n  @media print{\n    body{background:#fff;color:#111;padding:0.5rem}\n    .chart-card{background:#f9fafb;border-color:#e5e7eb;break-inside:avoid}\n    .chart-title,.chart-meta{color:#111}\n    .report-meta{color:#6b7280}\n  }\n</style>\n</head>\n<body>\n<h1>' + escHtml(reportTitle) + '</h1>\n<div class="report-meta">Generated ' + new Date().toLocaleString() + ' &mdash; ' + reportCharts.length + ' chart' + (reportCharts.length !== 1 ? "s" : "") + '</div>\n<div class="charts-grid">\n' + chartsHtml + '\n</div>\n</body>\n</html>';
 
     const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
     const url  = URL.createObjectURL(blob);
@@ -497,8 +607,6 @@ function openTemplateManager() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   function render() {
     const container = document.getElementById("moduleContainer");
@@ -598,6 +706,8 @@ function openTemplateManager() {
         type, field, fieldLabel, title,
         maxGroups:  max,
         data:       previewData,
+        note:       "",
+        showLegend: true,
       };
 
       reportCharts.push(chartDef);
@@ -632,9 +742,62 @@ function openTemplateManager() {
     card.className    = "rb-chart-card";
     card.dataset.chartId = chartDef.id;
 
-    card.innerHTML = '<div class="rb-chart-card-header"><div class="rb-chart-card-title">' + escHtml(chartDef.title || "Chart") + '</div><div class="rb-chart-card-meta">Grouped by ' + escHtml(chartDef.fieldLabel || chartDef.field) + ' &mdash; ' + chartDef.data.length + ' values</div></div><div class="rb-chart-wrap ' + (isPie ? "rb-chart-wrap--pie" : "") + '"><canvas id="' + canvasId + '"></canvas></div><div class="rb-chart-card-footer"><button class="btn btn-ghost rb-remove-btn" data-id="' + chartDef.id + '">✕ Remove</button></div>';
+    const cardHeader = document.createElement("div");
+    cardHeader.className = "rb-chart-card-header";
+    
+    const cardTitle = document.createElement("div");
+    cardTitle.className = "rb-chart-card-title";
+    cardTitle.textContent = chartDef.title || "Chart";
+    
+    const cardMeta = document.createElement("div");
+    cardMeta.className = "rb-chart-card-meta";
+    cardMeta.textContent = "Grouped by " + (chartDef.fieldLabel || chartDef.field) + " — " + chartDef.data.length + " values";
+    
+    cardHeader.appendChild(cardTitle);
+    cardHeader.appendChild(cardMeta);
+    
+    const chartWrap = document.createElement("div");
+    chartWrap.className = "rb-chart-wrap" + (isPie ? " rb-chart-wrap--pie" : "");
+    
+    const chartCanvas = document.createElement("canvas");
+    chartCanvas.id = canvasId;
+    chartWrap.appendChild(chartCanvas);
+    
+    let noteEl;
+    if (chartDef.note) {
+      noteEl = document.createElement("div");
+      noteEl.className = "rb-chart-note";
+      noteEl.textContent = chartDef.note;
+    }
+    
+    const cardFooter = document.createElement("div");
+    cardFooter.className = "rb-chart-card-footer";
+    
+    const editBtn = document.createElement("button");
+    editBtn.className = "btn btn-ghost btn-xs";
+    editBtn.dataset.id = chartDef.id;
+    editBtn.innerHTML = "✏️ Edit";
+    editBtn.style.color = "#a78bfa";
+    
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "btn btn-ghost btn-xs";
+    removeBtn.dataset.id = chartDef.id;
+    removeBtn.innerHTML = "✕ Remove";
+    removeBtn.style.color = "#f87171";
+    
+    cardFooter.appendChild(editBtn);
+    cardFooter.appendChild(removeBtn);
+    
+    card.appendChild(cardHeader);
+    card.appendChild(chartWrap);
+    if (noteEl) card.appendChild(noteEl);
+    card.appendChild(cardFooter);
 
-    card.querySelector(".rb-remove-btn").addEventListener("click", function() {
+    editBtn.addEventListener("click", function() {
+      openChartEditor(chartDef.id);
+    });
+
+    removeBtn.addEventListener("click", function() {
       reportCharts = reportCharts.filter(c => c.id !== chartDef.id);
       if (chartInstances[canvasId]) {
         chartInstances[canvasId].destroy();
