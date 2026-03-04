@@ -550,7 +550,6 @@
     applyCalcColumns();
 
     updateFileInfo();
-    updateDownloadBtn();
 
     // Reset search UI on new file
     const si = document.getElementById("csvSearchInput");
@@ -828,9 +827,6 @@
             <button class="btn btn-secondary btn-sm" id="csvUndoBtn" disabled title="Undo last operation">
               ↩ Undo
             </button>
-            <button class="btn btn-secondary btn-sm" id="csvDownloadBtn" disabled>
-              ↓ CSV
-            </button>
             <button class="btn btn-sm" id="exportOpenButton">
               Export…
             </button>
@@ -889,7 +885,6 @@
 
     wireEvents();
     updateFileInfo();
-    updateDownloadBtn();
     updateRailState();
     if (drawerState.open && drawerState.panel) {
       openDrawer(drawerState.panel);
@@ -932,10 +927,6 @@
         if (f) handleFile(f);
       });
     }
-
-    // CSV quick-download
-    const dlBtn = root.querySelector("#csvDownloadBtn");
-    if (dlBtn) dlBtn.addEventListener("click", () => downloadCurrentCsv());
 
     // Undo
     const undoBtn = root.querySelector("#csvUndoBtn");
@@ -1180,11 +1171,6 @@
       badge.textContent = `⚡ ${p?.label || viewState.activePreset}`;
       el.appendChild(badge);
     }
-  }
-
-  function updateDownloadBtn() {
-    const btn = document.getElementById("csvDownloadBtn");
-    if (btn) btn.disabled = !parsedData || !parsedData.rows.length;
   }
 
   // ── User preset storage ───────────────────────────────────────────────────

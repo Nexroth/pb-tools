@@ -800,8 +800,35 @@
         indexAxis: type === "horizontalBar" ? "y" : "x",
         plugins: {
           legend: {
-            display: chartDef.showLegend !== false ? !isIndexed : false,
-            labels: { color: "#e5e7eb", font: { size: 11 } },
+            display: chartDef.showLegend !== false,  // Show legend for ALL chart types
+            labels: isIndexed ? {
+              // Custom legend for bar/line/scatter/bubble - show each category
+              generateLabels: function(chart) {
+                const dataset = chart.data.datasets[0];
+                return labels.map((label, i) => ({
+                  text: label,
+                  fillStyle: colors[i],
+                  strokeStyle: colors[i],
+                  lineWidth: 1,
+                  hidden: false,
+                  index: i,
+                  fontColor: '#f9fafb'  // Add explicit font color to each label
+                }));
+              },
+              color: "#f9fafb",  // Bright white instead of light gray
+              font: { size: 11, weight: '500' },
+              padding: 8,
+              boxWidth: 12,
+              boxHeight: 12,
+            } : { 
+              // Default legend for pie/doughnut
+              color: "#f9fafb",  // Bright white
+              font: { size: 11, weight: '500' },
+              padding: 12,
+              boxWidth: 15,
+              boxHeight: 15
+            },
+            position: 'top',  // Consistent position
           },
           title: {
             display: false,
@@ -820,12 +847,12 @@
         scales: isIndexed ? {
           x: { 
             ticks: { 
-              color: "#9ca3af",
+              color: "#d1d5db",  // Light gray for visibility
               callback: isScatterType ? (val, index) => labels[index] || val : undefined
             }, 
             grid: { color: "rgba(255,255,255,0.06)" } 
           },
-          y: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,0.06)" } },
+          y: { ticks: { color: "#d1d5db" }, grid: { color: "rgba(255,255,255,0.06)" } },
         } : undefined,
       },
     };
@@ -896,8 +923,8 @@
                 legend: { display: true, labels: { color: "#f9fafb" } }
               },
               scales: ["bar","line","horizontalBar"].includes(chartDef.type) ? {
-                x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(148,163,184,0.1)" } },
-                y: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(148,163,184,0.1)" } }
+                x: { ticks: { color: "#d1d5db" }, grid: { color: "rgba(148,163,184,0.1)" } },
+                y: { ticks: { color: "#d1d5db" }, grid: { color: "rgba(148,163,184,0.1)" } }
               } : undefined
             }
           };
@@ -923,7 +950,7 @@
       }
     }).join("\n");
 
-    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + escHtml(reportTitle) + '</title>\n<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>\n<style>\n  *,*::before,*::after{box-sizing:border-box}\n  body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f9fafb;margin:0;padding:1.5rem 2rem;min-height:100vh}\n  h1{font-size:1.4rem;margin:0 0 0.25rem;font-weight:700}\n  .report-meta{font-size:0.78rem;color:#6b7280;margin-bottom:2rem}\n  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.5rem}\n  .chart-card{background:#1e293b;border-radius:0.75rem;border:1px solid rgba(148,163,184,0.15);padding:1.25rem 1.5rem}\n  .chart-title{font-size:1rem;font-weight:600;margin:0 0 0.2rem;color:#f9fafb}\n  .chart-meta{font-size:0.72rem;color:#6b7280;margin:0 0 1rem}\n  .chart-wrap{position:relative;height:300px}\n  .chart-wrap--pie{height:280px;max-width:380px;margin:0 auto}\n  .chart-note{background:rgba(167,139,250,0.1);border-left:3px solid #a78bfa;padding:0.75rem 1rem;margin:1rem 0 0;border-radius:0.375rem;font-size:0.85rem;line-height:1.5;color:#9ca3af;font-style:italic}\n  @media print{\n    body{background:#fff;color:#111;padding:0.5rem}\n    .chart-card{background:#f9fafb;border-color:#e5e7eb;break-inside:avoid}\n    .chart-title,.chart-meta{color:#111}\n    .report-meta{color:#6b7280}\n  }\n</style>\n</head>\n<body>\n<h1>' + escHtml(reportTitle) + '</h1>\n<div class="report-meta">Generated ' + new Date().toLocaleString() + ' &mdash; ' + reportCharts.length + ' chart' + (reportCharts.length !== 1 ? "s" : "") + '</div>\n<div class="charts-grid">\n' + chartsHtml + '\n</div>\n</body>\n</html>';
+    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + escHtml(reportTitle) + '</title>\n<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>\n<style>\n  *,*::before,*::after{box-sizing:border-box}\n  body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f9fafb;margin:0;padding:1.5rem 2rem;min-height:100vh}\n  h1{font-size:1.4rem;margin:0 0 0.25rem;font-weight:700}\n  .report-meta{font-size:0.78rem;color:#6b7280;margin-bottom:2rem}\n  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.5rem}\n  .chart-card{background:#1e293b;border-radius:0.75rem;border:1px solid rgba(148,163,184,0.15);padding:1.25rem 1.5rem;break-inside:avoid;page-break-inside:avoid}\n  .chart-title{font-size:1rem;font-weight:600;margin:0 0 0.2rem;color:#f9fafb}\n  .chart-meta{font-size:0.72rem;color:#6b7280;margin:0 0 1rem}\n  .chart-wrap{position:relative;height:300px}\n  .chart-wrap--pie{height:280px;max-width:380px;margin:0 auto}\n  .chart-note{background:rgba(167,139,250,0.1);border-left:3px solid #a78bfa;padding:0.75rem 1rem;margin:1rem 0 0;border-radius:0.375rem;font-size:0.85rem;line-height:1.5;color:#9ca3af;font-style:italic}\n</style>\n</head>\n<body>\n<h1>' + escHtml(reportTitle) + '</h1>\n<div class="report-meta">Generated ' + new Date().toLocaleString() + ' &mdash; ' + reportCharts.length + ' chart' + (reportCharts.length !== 1 ? "s" : "") + '</div>\n<div class="charts-grid">\n' + chartsHtml + '\n</div>\n</body>\n</html>';
 
     const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
     const url  = URL.createObjectURL(blob);
@@ -1418,8 +1445,8 @@
           legend: { display: true, labels: { color: "#f9fafb" } }
         },
         scales: ["bar","line","horizontalBar"].includes(type) ? {
-          x: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(148,163,184,0.1)" } },
-          y: { ticks: { color: "#9ca3af" }, grid: { color: "rgba(148,163,184,0.1)" } }
+          x: { ticks: { color: "#d1d5db" }, grid: { color: "rgba(148,163,184,0.1)" } },
+          y: { ticks: { color: "#d1d5db" }, grid: { color: "rgba(148,163,184,0.1)" } }
         } : undefined
       }
     };

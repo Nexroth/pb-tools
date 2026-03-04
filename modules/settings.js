@@ -106,7 +106,7 @@
             </p>
             <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); 
                         font-size: 0.85rem; color: var(--text-muted);">
-              Version 0.6.0 &bull; Local only
+              Version 0.6.1 &bull; Local only
             </div>
           </div>
         </div>
@@ -196,7 +196,7 @@
       // Collect all PB Tools data from localStorage
       const backup = {
         _metadata: {
-          version: "0.6.0",
+          version: "0.6.1",
           exportDate: new Date().toISOString(),
           description: "PB Tools data backup"
         },
