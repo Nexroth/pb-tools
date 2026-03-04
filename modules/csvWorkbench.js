@@ -8,6 +8,7 @@
   const NOTE_COL         = "StatusNote";
   const NOTE_CONFIG_KEY  = "pbToolsNoteConfigs";     // Note key configurations
   const ACTIVE_CONFIG_KEY = "pbToolsActiveNoteConfig"; // Currently active config ID
+  const CALC_COLUMNS_KEY = "pbToolsCalcColumns";     // Calculations
 
   // Protected columns are now determined dynamically based on active note key config
   // Plus some always-protected columns
@@ -36,6 +37,7 @@
   let sortState     = { field: null, dir: "asc" };
   let filterState   = { text: "", field: "" };  // "" field = search all columns
   let rowFilters    = [];  // [{ field, op, value }] — preset-applied exact filters; op: "eq"|"neq"|"contains"|"empty"|"notempty"
+  let calcColumns   = [];  // [{ id, name, formula }] — calculated column definitions
 
   // ── Drawer state ──────────────────────────────────────────────────────────
   let drawerState   = { open: false, panel: null };
@@ -46,6 +48,8 @@
     mapping:  "Value mapping",
     tools:    "Tools",
     notekeys: "Note Keys",
+    calc:     "Calculations",
+    summary:  "Summary",
   };
 
   const PANEL_ICONS = {
@@ -54,6 +58,8 @@
     mapping:  "⇄",
     tools:    "🔧",
     notekeys: "🔑",
+    calc:     "🧮",
+    summary:  "📊",
   };
 
   // ── Annotation cache ──────────────────────────────────────────────────────
@@ -314,10 +320,93 @@
   // Users can now create custom presets with their own field selections and mappings
 
 
-  function computeGroupAndCount(field) {
+  // Enhanced aggregation engine supporting multiple aggregation types
+  function computeAggregation(config) {
     if (!parsedData) return null;
+    
+    // config: { groupBy, aggregations: [{ field, type: 'sum'|'avg'|'min'|'max'|'count' }], includePercentage }
+    // Backward compat: if config is a string, treat as simple count
+    if (typeof config === 'string') {
+      return computeSimpleCount(config);
+    }
+    
+    const { groupBy, aggregations = [], includePercentage = false } = config;
+    
+    // Use filtered rows (respects row filters from presets)
+    const sourceRows = getFilteredSortedRows();
+    
+    // Group rows
+    const groups = {};
+    sourceRows.forEach(row => {
+      const key = (row[groupBy] == null || row[groupBy] === "") ? "(empty)" : String(row[groupBy]);
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(row);
+    });
+    
+    // Compute aggregations for each group
+    const rows = Object.entries(groups).map(([value, groupRows]) => {
+      const result = { value, count: groupRows.length, metrics: {} };
+      
+      aggregations.forEach(agg => {
+        const { field, type, label } = agg;
+        const aggLabel = label || `${type}(${field})`;
+        
+        const numericValues = groupRows
+          .map(r => parseFloat(r[field]))
+          .filter(v => !isNaN(v));
+        
+        if (numericValues.length === 0) {
+          result.metrics[aggLabel] = null;
+          return;
+        }
+        
+        switch (type) {
+          case 'sum':
+            result.metrics[aggLabel] = numericValues.reduce((a, b) => a + b, 0);
+            break;
+          case 'avg':
+            result.metrics[aggLabel] = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+            break;
+          case 'min':
+            result.metrics[aggLabel] = Math.min(...numericValues);
+            break;
+          case 'max':
+            result.metrics[aggLabel] = Math.max(...numericValues);
+            break;
+          case 'count':
+            result.metrics[aggLabel] = numericValues.length;
+            break;
+        }
+      });
+      
+      return result;
+    });
+    
+    // Sort by count descending
+    rows.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    
+    // Add percentage if requested
+    if (includePercentage) {
+      const total = rows.reduce((sum, r) => sum + r.count, 0);
+      rows.forEach(r => {
+        r.percentOfTotal = total > 0 ? (r.count / total * 100) : 0;
+      });
+    }
+    
+    return { groupBy, aggregations, rows, includePercentage };
+  }
+  
+  // Simple count for backward compatibility
+  function computeSimpleCount(field) {
+    if (!parsedData) return null;
+    
+    // Use filtered rows (respects row filters from presets)
+    const sourceRows = getFilteredSortedRows();
+    
     const counts = {};
-    parsedData.rows.forEach(row => {
+    sourceRows.forEach(row => {
       const key = (row[field] == null || row[field] === "") ? "(empty)" : String(row[field]);
       counts[key] = (counts[key] || 0) + 1;
     });
@@ -325,6 +414,11 @@
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
     return { field, rows };
+  }
+  
+  // Backward compatibility wrapper
+  function computeGroupAndCount(field) {
+    return computeSimpleCount(field);
   }
 
   function getEffectiveFields() {
@@ -452,6 +546,9 @@
     viewState.activePreset   = null;
     fields.forEach(f => { viewState.displayNames[f] = f; });
 
+    // Apply calculations if any exist
+    applyCalcColumns();
+
     updateFileInfo();
     updateDownloadBtn();
 
@@ -546,8 +643,43 @@
 
   function exportSummaryHtml() {
     if (!lastSummary?.rows.length) return;
-    const dn  = viewState.displayNames[lastSummary.field] || lastSummary.field;
+    const groupByField = lastSummary.groupBy || lastSummary.field;
+    const dn = viewState.displayNames[groupByField] || groupByField;
     const rows = lastSummary.rows;
+    
+    // Build table headers
+    let headers = `<th>${escHtml(dn)}</th><th>Count</th>`;
+    if (lastSummary.includePercentage) {
+      headers += `<th>% of Total</th>`;
+    }
+    if (lastSummary.aggregations?.length) {
+      lastSummary.aggregations.forEach(agg => {
+        headers += `<th>${escHtml(agg.label)}</th>`;
+      });
+    }
+    
+    // Build table rows
+    const tableRows = rows.map(r => {
+      let cells = `<td>${escHtml(String(r.value))}</td><td>${r.count.toLocaleString()}</td>`;
+      
+      if (lastSummary.includePercentage) {
+        cells += `<td>${r.percentOfTotal != null ? r.percentOfTotal.toFixed(1) + '%' : '-'}</td>`;
+      }
+      
+      if (lastSummary.aggregations?.length) {
+        lastSummary.aggregations.forEach(agg => {
+          const val = r.metrics?.[agg.label];
+          if (val != null) {
+            const formatted = agg.type === 'avg' ? val.toFixed(2) : val.toLocaleString();
+            cells += `<td>${formatted}</td>`;
+          } else {
+            cells += `<td>-</td>`;
+          }
+        });
+      }
+      
+      return `<tr>${cells}</tr>`;
+    }).join("");
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -562,7 +694,7 @@
   table{border-collapse:collapse;width:auto;min-width:280px;font-size:12px}
   th{background:#f3f4f6;color:#374151;font-weight:600;text-align:left;padding:0.4rem 0.6rem;border:1px solid #e5e7eb}
   td{padding:0.35rem 0.6rem;border:1px solid #e5e7eb}
-  td:last-child{text-align:right}
+  td:not(:first-child){text-align:right}
   tr:nth-child(even) td{background:#f9fafb}
   @media print{th{background:#e5e7eb!important;-webkit-print-color-adjust:exact}}
 </style>
@@ -571,8 +703,8 @@
 <h1>Summary — ${escHtml(dn)}</h1>
 <div class="meta">Exported ${new Date().toLocaleString()} &mdash; ${rows.length.toLocaleString()} distinct values</div>
 <table>
-<thead><tr><th>${escHtml(dn)}</th><th>Count</th></tr></thead>
-<tbody>${rows.map(r => `<tr><td>${escHtml(String(r.value))}</td><td>${r.count.toLocaleString()}</td></tr>`).join("")}</tbody>
+<thead><tr>${headers}</tr></thead>
+<tbody>${tableRows}</tbody>
 </table>
 </body>
 </html>`;
@@ -582,15 +714,59 @@
 
   function exportSummaryCsv() {
     if (!lastSummary?.rows.length) return;
-    const dn   = viewState.displayNames[lastSummary.field] || lastSummary.field;
-    const data = lastSummary.rows.map(r => ({ [dn]: r.value, Count: r.count }));
+    const groupByField = lastSummary.groupBy || lastSummary.field;
+    const dn = viewState.displayNames[groupByField] || groupByField;
+    
+    const data = lastSummary.rows.map(r => {
+      const row = { [dn]: r.value, Count: r.count };
+      
+      if (lastSummary.includePercentage) {
+        row["% of Total"] = r.percentOfTotal != null ? r.percentOfTotal.toFixed(1) + '%' : '-';
+      }
+      
+      if (lastSummary.aggregations?.length) {
+        lastSummary.aggregations.forEach(agg => {
+          const val = r.metrics?.[agg.label];
+          if (val != null) {
+            row[agg.label] = agg.type === 'avg' ? val.toFixed(2) : val;
+          } else {
+            row[agg.label] = '-';
+          }
+        });
+      }
+      
+      return row;
+    });
+    
     triggerDownload(new Blob([Papa.unparse(data)], { type: "text/csv;charset=utf-8;" }), "pb-tools-summary.csv");
   }
 
   function exportSummaryXlsx() {
     if (!lastSummary?.rows.length) return;
-    const dn   = viewState.displayNames[lastSummary.field] || lastSummary.field;
-    const data = lastSummary.rows.map(r => ({ [dn]: r.value, Count: r.count }));
+    const groupByField = lastSummary.groupBy || lastSummary.field;
+    const dn = viewState.displayNames[groupByField] || groupByField;
+    
+    const data = lastSummary.rows.map(r => {
+      const row = { [dn]: r.value, Count: r.count };
+      
+      if (lastSummary.includePercentage) {
+        row["% of Total"] = r.percentOfTotal != null ? r.percentOfTotal.toFixed(1) + '%' : '-';
+      }
+      
+      if (lastSummary.aggregations?.length) {
+        lastSummary.aggregations.forEach(agg => {
+          const val = r.metrics?.[agg.label];
+          if (val != null) {
+            row[agg.label] = agg.type === 'avg' ? parseFloat(val.toFixed(2)) : val;
+          } else {
+            row[agg.label] = '-';
+          }
+        });
+      }
+      
+      return row;
+    });
+    
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Summary");
@@ -702,10 +878,9 @@
             <div class="ops-drawer-body" id="opsDrawerBody"></div>
           </div>
 
-          <!-- Table + summary -->
+          <!-- Table (summary moved to drawer) -->
           <div class="csv-content">
             <div class="csv-table-area" id="csvTableContainer"></div>
-            <div class="csv-summary-area" id="csvSummaryArea"></div>
           </div>
 
         </div>
@@ -825,12 +1000,31 @@
     const bar = document.getElementById("csvRowFilterBar");
     if (!bar) return;
     bar.innerHTML = "";
-    if (!rowFilters.length) {
+    
+    const hasPreset = !!viewState.activePreset;
+    const hasFilters = rowFilters.length > 0;
+    
+    if (!hasPreset && !hasFilters) {
       bar.style.display = "none";
       return;
     }
     bar.style.display = "flex";
 
+    // Show active preset badge
+    if (hasPreset) {
+      const allPresets = { ...presets, ...loadUserPresets() };
+      const preset = allPresets[viewState.activePreset];
+      if (preset) {
+        const presetBadge = document.createElement("div");
+        presetBadge.className = "row-filter-badge preset-badge";
+        presetBadge.style.background = "rgba(168, 139, 250, 0.15)";
+        presetBadge.style.borderColor = "rgba(168, 139, 250, 0.3)";
+        presetBadge.innerHTML = `<span>⚡ ${preset.label}</span>`;
+        bar.appendChild(presetBadge);
+      }
+    }
+
+    // Show individual filter badges
     const OP_LABELS = { eq: "=", neq: "≠", contains: "contains", empty: "is empty", notempty: "is not empty" };
 
     rowFilters.forEach((rf, i) => {
@@ -843,22 +1037,43 @@
       bar.appendChild(badge);
     });
 
-    const clearAll = document.createElement("button");
-    clearAll.className   = "btn btn-ghost";
-    clearAll.style.cssText = "font-size:0.68rem;padding:0.1rem 0.4rem;";
-    clearAll.textContent = "Clear all filters";
-    clearAll.addEventListener("click", () => {
-      rowFilters = [];
-      renderRowFilterBadges();
-      renderTablePreview();
-    });
-    bar.appendChild(clearAll);
+    // Clear/Unapply button
+    if (hasPreset || hasFilters) {
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "btn btn-ghost";
+      clearBtn.style.cssText = "font-size:0.68rem;padding:0.1rem 0.4rem;";
+      clearBtn.textContent = hasPreset ? "Unapply preset" : "Clear all filters";
+      clearBtn.addEventListener("click", () => {
+        rowFilters = [];
+        viewState.activePreset = null;
+        renderRowFilterBadges();
+        renderTablePreview();
+        renderSummaryPanel();
+        updateFileInfo();  // Clear preset badge from top
+        // Refresh Presets panel if it's open
+        if (drawerState.open && drawerState.panel === "presets") {
+          renderDrawerPanel("presets");
+        }
+      });
+      bar.appendChild(clearBtn);
+    }
 
+    // Wire up individual filter remove buttons
     bar.querySelectorAll(".row-filter-remove").forEach(btn => {
       btn.addEventListener("click", () => {
         rowFilters.splice(parseInt(btn.dataset.idx), 1);
+        // If manually removing filters, clear active preset since state no longer matches preset
+        if (viewState.activePreset) {
+          viewState.activePreset = null;
+          updateFileInfo();
+          // Refresh Presets panel if open
+          if (drawerState.open && drawerState.panel === "presets") {
+            renderDrawerPanel("presets");
+          }
+        }
         renderRowFilterBadges();
         renderTablePreview();
+        renderSummaryPanel();
       });
     });
   }
@@ -881,7 +1096,11 @@
     drawerState = { open: true, panel };
     const drawer    = document.getElementById("opsDrawer");
     const titleEl   = document.getElementById("opsDrawerTitle");
-    if (drawer)  drawer.classList.add("open");
+    if (drawer) {
+      drawer.classList.add("open");
+      // Summary panel needs more width for multi-column results
+      drawer.classList.toggle("wide", panel === "summary");
+    }
     if (titleEl) titleEl.textContent = PANEL_LABELS[panel] || panel;
     updateRailState();
     renderDrawerPanel(panel);
@@ -890,7 +1109,9 @@
   function closeDrawer() {
     drawerState = { open: false, panel: null };
     const drawer = document.getElementById("opsDrawer");
-    if (drawer) drawer.classList.remove("open");
+    if (drawer) {
+      drawer.classList.remove("open", "wide");
+    }
     updateRailState();
   }
 
@@ -911,7 +1132,9 @@
       case "presets":  buildPresetsPanel(body);  break;
       case "mapping":  buildMappingPanel(body);  break;
       case "notekeys": buildNoteKeysPanel(body); break;
+      case "calc":     buildCalcColumnsPanel(body); break;
       case "tools":    buildToolsPanel(body);    break;
+      case "summary":  buildSummaryPanel(body);  break;
     }
   }
 
@@ -2253,9 +2476,8 @@
         actions.appendChild(exportBtn);
         
         const deleteBtn = document.createElement("button");
-        deleteBtn.className = "btn btn-ghost btn-sm";
+        deleteBtn.className = "btn btn-ghost btn-sm btn-text-danger";
         deleteBtn.textContent = "Delete";
-        deleteBtn.style.color = "#ef4444";
         let confirmTimeout = null;
         let confirming = false;
         deleteBtn.addEventListener("click", () => {
@@ -2766,6 +2988,782 @@
       const f = e.dataTransfer.files?.[0];
       if (f) handleLookupFile(f);
     });
+  }
+
+  // ── Calculations Panel ──────────────────────────────────────────────
+  function buildCalcColumnsPanel(container) {
+    if (!parsedData) {
+      noDataMessage(container, "Load a CSV file to create calculated columns.");
+      return;
+    }
+
+    // Load saved calculations
+    loadCalcColumns();
+
+    // Info section
+    const infoSection = panelSection("Calculations");
+    const infoText = document.createElement("div");
+    infoText.className = "panel-hint";
+    infoText.innerHTML = "Create new columns based on formulas. Use <code>{ColumnName}</code> syntax to reference existing columns. Supports: <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>(</code> <code>)</code>";
+    infoSection.appendChild(infoText);
+    container.appendChild(infoSection);
+
+    const divider1 = document.createElement("div");
+    divider1.className = "panel-divider";
+    container.appendChild(divider1);
+
+    // List of existing calculations
+    const listSection = panelSection(`ACTIVE COLUMNS (${calcColumns.length})`);
+    
+    if (calcColumns.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "panel-hint";
+      empty.textContent = 'No calculated columns yet. Click "Add Calculated Column" below to create one.';
+      listSection.appendChild(empty);
+    } else {
+      calcColumns.forEach(calc => {
+        const item = document.createElement("div");
+        item.className = "calc-column-item";
+        item.style.cssText = "padding: 0.5rem; background: var(--bg-tertiary); border-radius: 0.25rem; margin-bottom: 0.5rem;";
+        
+        const header = document.createElement("div");
+        header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;";
+        
+        const name = document.createElement("strong");
+        name.textContent = calc.name;
+        name.style.color = "var(--text-primary)";
+        
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn btn-ghost btn-xs btn-text-danger";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.addEventListener("click", () => {
+          if (confirm(`Delete calculated column "${calc.name}"?`)) {
+            deleteCalcColumn(calc.id);
+            renderDrawerPanel("calc");
+            applyCalcColumns();
+            renderTablePreview();
+            renderSummaryPanel();
+          }
+        });
+        
+        header.appendChild(name);
+        header.appendChild(deleteBtn);
+        
+        const formula = document.createElement("div");
+        formula.className = "info-text";
+        formula.style.fontFamily = "monospace";
+        formula.style.fontSize = "0.85rem";
+        formula.textContent = calc.formula;
+        
+        item.appendChild(header);
+        item.appendChild(formula);
+        listSection.appendChild(item);
+      });
+    }
+    
+    container.appendChild(listSection);
+
+    // Clear All Calculations button
+    if (calcColumns.length > 0) {
+      const clearAllBtn = document.createElement("button");
+      clearAllBtn.className = "btn btn-secondary btn-sm";
+      clearAllBtn.textContent = "Clear All Calculations";
+      clearAllBtn.style.width = "100%";
+      clearAllBtn.style.marginTop = "0.5rem";
+      clearAllBtn.addEventListener("click", () => {
+        if (confirm("Delete all calculated columns? This cannot be undone.")) {
+          // Store column names before clearing array
+          const columnNames = calcColumns.map(c => c.name);
+          
+          // Clear calcColumns array
+          calcColumns = [];
+          saveCalcColumns();
+          
+          // Remove columns from parsedData
+          if (parsedData) {
+            columnNames.forEach(colName => {
+              const idx = parsedData.fields.indexOf(colName);
+              if (idx !== -1) {
+                parsedData.fields.splice(idx, 1);
+              }
+              parsedData.rows.forEach(row => delete row[colName]);
+              
+              // Remove from visible fields
+              const visIdx = viewState.visibleFields.indexOf(colName);
+              if (visIdx !== -1) {
+                viewState.visibleFields.splice(visIdx, 1);
+              }
+              
+              // Remove from displayNames
+              delete viewState.displayNames[colName];
+            });
+          }
+          
+          // Refresh the UI
+          renderDrawerPanel("calc");
+          renderTablePreview();
+          renderSummaryPanel();
+        }
+      });
+      container.appendChild(clearAllBtn);
+    }
+
+    const divider2 = document.createElement("div");
+    divider2.className = "panel-divider";
+    container.appendChild(divider2);
+
+    // Add new calculated column form
+    const addSection = panelSection("ADD NEW COLUMN");
+    
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "panel-label";
+    nameLabel.textContent = "Column Name:";
+    addSection.appendChild(nameLabel);
+    
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "panel-input";
+    nameInput.id = "calcColName";
+    nameInput.placeholder = "e.g., Click Rate %";
+    addSection.appendChild(nameInput);
+    
+    const formulaLabel = document.createElement("label");
+    formulaLabel.className = "panel-label";
+    formulaLabel.style.marginTop = "0.5rem";
+    formulaLabel.textContent = "Formula:";
+    addSection.appendChild(formulaLabel);
+    
+    const formulaInput = document.createElement("input");
+    formulaInput.type = "text";
+    formulaInput.className = "panel-input";
+    formulaInput.id = "calcColFormula";
+    formulaInput.placeholder = "e.g., {Clicked} / {Recipients} * 100";
+    formulaInput.style.fontFamily = "monospace";
+    addSection.appendChild(formulaInput);
+    
+    const hint = document.createElement("div");
+    hint.className = "panel-hint";
+    hint.style.marginTop = "0.5rem";
+    hint.innerHTML = `<strong>Examples:</strong><br>
+    • {Clicked} / {Recipients} * 100<br>
+    • {Price} * {Quantity}<br>
+    • ({Revenue} - {Cost}) / {Revenue}`;
+    addSection.appendChild(hint);
+    
+    const errorMsg = document.createElement("div");
+    errorMsg.id = "calcColError";
+    errorMsg.style.cssText = "color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; display: none;";
+    addSection.appendChild(errorMsg);
+    
+    container.appendChild(addSection);
+    
+    const addBtn = applyButton("Add Calculated Column");
+    addBtn.addEventListener("click", () => {
+      const name = nameInput.value.trim();
+      const formula = formulaInput.value.trim();
+      
+      errorMsg.style.display = "none";
+      
+      if (!name || !formula) {
+        errorMsg.textContent = "Please enter both name and formula.";
+        errorMsg.style.display = "block";
+        return;
+      }
+      
+      // Check if name already exists
+      if (parsedData.fields.includes(name) || calcColumns.some(c => c.name === name)) {
+        errorMsg.textContent = `Column "${name}" already exists.`;
+        errorMsg.style.display = "block";
+        return;
+      }
+      
+      // Validate formula syntax
+      const validation = validateFormula(formula);
+      if (!validation.valid) {
+        errorMsg.textContent = validation.error;
+        errorMsg.style.display = "block";
+        return;
+      }
+      
+      // Add calculated column
+      const id = `calc_${Date.now()}`;
+      calcColumns.push({ id, name, formula });
+      saveCalcColumns();
+      
+      // Clear inputs
+      nameInput.value = "";
+      formulaInput.value = "";
+      
+      // Rebuild panel and apply calculations
+      renderDrawerPanel("calc");
+      applyCalcColumns();
+      renderTablePreview();
+      renderSummaryPanel();
+    });
+    container.appendChild(addBtn);
+  }
+
+  // ── Summary Panel (Drawer) ───────────────────────────────────────────
+  function buildSummaryPanel(container) {
+    if (!parsedData) {
+      noDataMessage(container, "Load a CSV file to create summaries.");
+      return;
+    }
+
+    // Info section
+    const infoSection = panelSection();
+    const infoText = document.createElement("div");
+    infoText.className = "panel-hint";
+    infoText.textContent = "Group rows and aggregate numeric columns to create summary reports.";
+    infoSection.appendChild(infoText);
+    container.appendChild(infoSection);
+
+    const divider1 = document.createElement("div");
+    divider1.className = "panel-divider";
+    container.appendChild(divider1);
+
+    // ── GROUP BY ──
+    const groupBySection = panelSection("GROUP BY");
+    
+    const groupBySelect = document.createElement("select");
+    groupBySelect.className = "panel-select";
+    groupBySelect.id = "summaryGroupBy";
+    
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = "Select column…";
+    groupBySelect.appendChild(ph);
+    
+    getEffectiveFields().filter(f => f !== NOTE_COL).forEach(f => {
+      const opt = document.createElement("option");
+      opt.value = f;
+      opt.textContent = viewState.displayNames[f] || f;
+      groupBySelect.appendChild(opt);
+    });
+    
+    if (lastSummary?.groupBy || lastSummary?.field) {
+      groupBySelect.value = lastSummary.groupBy || lastSummary.field;
+    }
+    
+    groupBySection.appendChild(groupBySelect);
+    container.appendChild(groupBySection);
+
+    // ── AGGREGATIONS ──
+    const aggSection = panelSection("AGGREGATE (OPTIONAL)");
+    
+    const aggHeader = document.createElement("div");
+    aggHeader.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;";
+    
+    const aggHint = document.createElement("div");
+    aggHint.className = "panel-hint";
+    aggHint.textContent = "Add metrics to aggregate numeric columns.";
+    
+    const addAggBtn = document.createElement("button");
+    addAggBtn.className = "btn btn-ghost";
+    addAggBtn.textContent = "+ Add metric";
+    addAggBtn.style.cssText = "padding:0.15rem 0.4rem;font-size:0.7rem;";
+    
+    aggHeader.appendChild(aggHint);
+    aggHeader.appendChild(addAggBtn);
+    aggSection.appendChild(aggHeader);
+    
+    const aggList = document.createElement("div");
+    aggList.id = "summaryAggList";
+    aggList.style.cssText = "display:flex;flex-direction:column;gap:0.25rem;margin-top:0.35rem;";
+    aggSection.appendChild(aggList);
+    
+    container.appendChild(aggSection);
+
+    // ── OPTIONS ──
+    const optionsSection = panelSection();
+    const optionsRow = document.createElement("div");
+    optionsRow.style.cssText = "display:flex;align-items:center;gap:0.5rem;";
+    
+    const percentCheck = document.createElement("input");
+    percentCheck.type = "checkbox";
+    percentCheck.id = "summaryIncludePercent";
+    
+    const percentLabel = document.createElement("label");
+    percentLabel.htmlFor = "summaryIncludePercent";
+    percentLabel.className = "panel-hint";
+    percentLabel.textContent = "Include % of total";
+    percentLabel.style.cssText = "cursor:pointer;margin:0;";
+    
+    optionsRow.appendChild(percentCheck);
+    optionsRow.appendChild(percentLabel);
+    optionsSection.appendChild(optionsRow);
+    container.appendChild(optionsSection);
+
+    // ── RUN BUTTON ──
+    const runBtn = applyButton("Run Summary");
+    runBtn.style.width = "100%";
+    container.appendChild(runBtn);
+
+    // ── RESULTS AREA ──
+    const divider2 = document.createElement("div");
+    divider2.className = "panel-divider";
+    container.appendChild(divider2);
+
+    const resultsSection = panelSection("RESULTS");
+    const resultsContainer = document.createElement("div");
+    resultsContainer.id = "summaryDrawerResults";
+    resultsContainer.style.cssText = "margin-top:0.5rem;";
+    resultsSection.appendChild(resultsContainer);
+    container.appendChild(resultsSection);
+
+    // ── Helper: Add aggregation row ──
+    function addAggRow(initField = "", initType = "sum") {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:0.3rem;align-items:center;";
+      
+      const fieldSelect = document.createElement("select");
+      fieldSelect.className = "panel-select";
+      fieldSelect.style.cssText = "flex:2;min-width:0;"; // More space for column names
+      
+      const fieldPh = document.createElement("option");
+      fieldPh.value = "";
+      fieldPh.textContent = "Select column…";
+      fieldSelect.appendChild(fieldPh);
+      
+      getEffectiveFields().filter(f => f !== NOTE_COL).forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = viewState.displayNames[f] || f;
+        if (f === initField) opt.selected = true;
+        fieldSelect.appendChild(opt);
+      });
+      
+      const typeSelect = document.createElement("select");
+      typeSelect.className = "panel-select";
+      typeSelect.style.cssText = "flex:0 0 4.5rem;"; // Fixed width for short words (SUM, AVG, etc.)
+      
+      [
+        { value: "sum", label: "SUM" },
+        { value: "avg", label: "AVG" },
+        { value: "min", label: "MIN" },
+        { value: "max", label: "MAX" },
+        { value: "count", label: "COUNT" },
+      ].forEach(({ value, label }) => {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = label;
+        if (value === initType) opt.selected = true;
+        typeSelect.appendChild(opt);
+      });
+      
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "btn btn-ghost";
+      removeBtn.textContent = "✕";
+      removeBtn.style.cssText = "padding:0.1rem 0.3rem;font-size:0.7rem;flex-shrink:0;";
+      removeBtn.addEventListener("click", () => row.remove());
+      
+      row.appendChild(fieldSelect);
+      row.appendChild(typeSelect);
+      row.appendChild(removeBtn);
+      aggList.appendChild(row);
+    }
+    
+    // Restore previous aggregations if they exist
+    if (lastSummary?.aggregations?.length) {
+      lastSummary.aggregations.forEach(agg => addAggRow(agg.field, agg.type));
+    }
+    
+    addAggBtn.addEventListener("click", () => addAggRow());
+
+    // ── RUN SUMMARY ──
+    runBtn.addEventListener("click", () => {
+      const groupBy = groupBySelect.value;
+      if (!groupBy) {
+        alert("Please select a column to group by.");
+        return;
+      }
+      
+      // Collect aggregations
+      const aggregations = [];
+      aggList.querySelectorAll("div").forEach(row => {
+        const selects = row.querySelectorAll("select");
+        if (selects.length >= 2) {
+          const field = selects[0].value;
+          const type = selects[1].value;
+          if (field && type) {
+            const displayName = viewState.displayNames[field] || field;
+            aggregations.push({
+              field,
+              type,
+              label: `${type.toUpperCase()}(${displayName})`,
+            });
+          }
+        }
+      });
+      
+      const includePercentage = percentCheck.checked;
+      
+      // Use new aggregation engine
+      if (aggregations.length > 0 || includePercentage) {
+        lastSummary = computeAggregation({ groupBy, aggregations, includePercentage });
+      } else {
+        // Simple count for backward compat
+        lastSummary = computeSimpleCount(groupBy);
+      }
+      
+      renderSummaryDrawerResults(resultsContainer);
+    });
+
+    // Render existing results if any
+    if (lastSummary?.rows?.length) {
+      renderSummaryDrawerResults(resultsContainer);
+    }
+  }
+
+  function renderSummaryDrawerResults(container) {
+    container.innerHTML = "";
+    if (!lastSummary?.rows?.length) {
+      const hint = document.createElement("div");
+      hint.className = "panel-hint";
+      hint.textContent = "No results yet. Configure and run a summary above.";
+      container.appendChild(hint);
+      return;
+    }
+
+    const groupByField = lastSummary.groupBy || lastSummary.field;
+    const dn = viewState.displayNames[groupByField] || groupByField;
+
+    const info = document.createElement("div");
+    info.className = "panel-hint";
+    info.style.marginBottom = "0.5rem";
+    info.textContent = `Grouped by "${dn}" — ${lastSummary.rows.length.toLocaleString()} distinct values.`;
+    container.appendChild(info);
+
+    const table = document.createElement("table");
+    table.className = "summary-table";
+    table.style.fontSize = "0.75rem";
+
+    // Build header
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    
+    // Value column
+    const thValue = document.createElement("th");
+    thValue.textContent = dn;
+    thValue.style.fontSize = "0.7rem";
+    hr.appendChild(thValue);
+    
+    // Count column
+    const thCount = document.createElement("th");
+    thCount.textContent = "Count";
+    thCount.style.cssText = "text-align:right;font-size:0.7rem;";
+    hr.appendChild(thCount);
+    
+    // Percentage column
+    if (lastSummary.includePercentage) {
+      const thPct = document.createElement("th");
+      thPct.textContent = "% Total";
+      thPct.style.cssText = "text-align:right;font-size:0.7rem;";
+      hr.appendChild(thPct);
+    }
+    
+    // Metric columns
+    if (lastSummary.aggregations?.length) {
+      lastSummary.aggregations.forEach(agg => {
+        const th = document.createElement("th");
+        th.textContent = agg.label;
+        th.style.cssText = "text-align:right;font-size:0.7rem;";
+        hr.appendChild(th);
+      });
+    }
+    
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    // Build body
+    const tbody = document.createElement("tbody");
+    lastSummary.rows.forEach(row => {
+      const tr = document.createElement("tr");
+      
+      // Value
+      const tdV = document.createElement("td");
+      tdV.textContent = row.value;
+      tdV.style.fontSize = "0.75rem";
+      tr.appendChild(tdV);
+      
+      // Count
+      const tdC = document.createElement("td");
+      tdC.textContent = row.count.toLocaleString();
+      tdC.style.cssText = "text-align:right;font-size:0.75rem;";
+      tr.appendChild(tdC);
+      
+      // Percentage
+      if (lastSummary.includePercentage) {
+        const tdP = document.createElement("td");
+        tdP.textContent = row.percentOfTotal != null ? row.percentOfTotal.toFixed(1) + "%" : "-";
+        tdP.style.cssText = "text-align:right;font-size:0.75rem;";
+        tr.appendChild(tdP);
+      }
+      
+      // Metrics
+      if (lastSummary.aggregations?.length) {
+        lastSummary.aggregations.forEach(agg => {
+          const tdM = document.createElement("td");
+          const val = row.metrics?.[agg.label];
+          if (val != null) {
+            const formatted = agg.type === 'avg' ? val.toFixed(2) : val.toLocaleString();
+            tdM.textContent = formatted;
+          } else {
+            tdM.textContent = "-";
+          }
+          tdM.style.cssText = "text-align:right;font-size:0.75rem;";
+          tr.appendChild(tdM);
+        });
+      }
+      
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    // Export buttons
+    const exportRow = document.createElement("div");
+    exportRow.style.cssText = "display:flex;gap:0.3rem;margin-top:0.75rem;";
+    
+    const csvBtn = document.createElement("button");
+    csvBtn.className = "btn btn-ghost";
+    csvBtn.textContent = "↓ CSV";
+    csvBtn.style.cssText = "flex:1;font-size:0.7rem;padding:0.25rem;";
+    csvBtn.addEventListener("click", exportSummaryCsv);
+    
+    const xlsxBtn = document.createElement("button");
+    xlsxBtn.className = "btn btn-ghost";
+    xlsxBtn.textContent = "↓ XLSX";
+    xlsxBtn.style.cssText = "flex:1;font-size:0.7rem;padding:0.25rem;";
+    xlsxBtn.addEventListener("click", exportSummaryXlsx);
+    
+    const htmlBtn = document.createElement("button");
+    htmlBtn.className = "btn btn-ghost";
+    htmlBtn.textContent = "↓ HTML";
+    htmlBtn.style.cssText = "flex:1;font-size:0.7rem;padding:0.25rem;";
+    htmlBtn.addEventListener("click", exportSummaryHtml);
+    
+    exportRow.appendChild(csvBtn);
+    exportRow.appendChild(xlsxBtn);
+    exportRow.appendChild(htmlBtn);
+    container.appendChild(exportRow);
+  }
+
+  // ── Calculations Helpers ────────────────────────────────────────────
+  function loadCalcColumns() {
+    try {
+      const raw = localStorage.getItem(CALC_COLUMNS_KEY);
+      calcColumns = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      console.error("Failed to load calculated columns:", e);
+      calcColumns = [];
+    }
+  }
+
+  function saveCalcColumns() {
+    try {
+      localStorage.setItem(CALC_COLUMNS_KEY, JSON.stringify(calcColumns));
+    } catch (e) {
+      console.error("Failed to save calculated columns:", e);
+    }
+  }
+
+function deleteCalcColumn(id) {
+    // Get the column name BEFORE filtering it out
+    const calc = calcColumns.find(c => c.id === id);
+    const columnName = calc ? calc.name : null;
+    
+    // Remove from calcColumns array
+    calcColumns = calcColumns.filter(c => c.id !== id);
+    saveCalcColumns();
+    
+    // Remove from parsed data fields and rows
+    if (parsedData && columnName) {
+      const idx = parsedData.fields.indexOf(columnName);
+      if (idx !== -1) {
+        parsedData.fields.splice(idx, 1);
+        parsedData.rows.forEach(row => delete row[columnName]);
+      }
+      
+      // Remove from visible fields
+      const visIdx = viewState.visibleFields.indexOf(columnName);
+      if (visIdx !== -1) {
+        viewState.visibleFields.splice(visIdx, 1);
+      }
+      
+      // Remove from displayNames
+      delete viewState.displayNames[columnName];
+    }
+  }
+
+  function validateFormula(formula) {
+    if (!formula || !parsedData) {
+      return { valid: false, error: "Formula is empty" };
+    }
+
+    // Extract column references {ColumnName}
+    const colRefs = formula.match(/\{([^}]+)\}/g);
+    if (!colRefs) {
+      return { valid: false, error: "Formula must reference at least one column using {ColumnName} syntax" };
+    }
+
+    // Check if all referenced columns exist
+    const missingCols = [];
+    colRefs.forEach(ref => {
+      const colName = ref.slice(1, -1); // Remove { }
+      if (!parsedData.fields.includes(colName) && !calcColumns.some(c => c.name === colName)) {
+        missingCols.push(colName);
+      }
+    });
+
+    if (missingCols.length > 0) {
+      return { valid: false, error: `Column(s) not found: ${missingCols.join(", ")}` };
+    }
+
+    // Check for valid operators (basic validation)
+    const cleanedFormula = formula.replace(/\{[^}]+\}/g, "1");
+    const invalidChars = cleanedFormula.match(/[^0-9+\-*/().\s]/g);
+    if (invalidChars && invalidChars.length > 0) {
+      return { valid: false, error: `Invalid characters in formula: ${[...new Set(invalidChars)].join(", ")}` };
+    }
+
+    return { valid: true };
+  }
+
+  function applyCalcColumns() {
+    if (!parsedData || calcColumns.length === 0) return;
+
+    calcColumns.forEach(calc => {
+      // Add column to fields if not already there
+      if (!parsedData.fields.includes(calc.name)) {
+        parsedData.fields.push(calc.name);
+        viewState.visibleFields.push(calc.name);
+      }
+
+      // Calculate value for each row
+      parsedData.rows.forEach(row => {
+        const result = executeFormula(calc.formula, row);
+        row[calc.name] = result;
+      });
+    });
+  }
+
+function executeFormula(formula, row) {
+    try {
+      // Replace {ColumnName} with actual values
+      let expr = formula;
+      const colRefs = formula.match(/\{([^}]+)\}/g) || [];
+      
+      colRefs.forEach(ref => {
+        const colName = ref.slice(1, -1);
+        let value = row[colName];
+        
+        // Convert to number, handle empty/null
+        if (value === null || value === undefined || value === "") {
+          value = 0;
+        } else {
+          // Remove commas and convert to number
+          value = Number(String(value).replace(/,/g, ""));
+          if (isNaN(value)) value = 0;
+        }
+        
+        // Replace ALL occurrences using regex
+        const regex = new RegExp(ref.replace(/[{}]/g, '\\$&'), 'g');
+        expr = expr.replace(regex, value);
+      });
+
+      // Evaluate using safe parser instead of eval()
+      const result = evaluateExpression(expr);
+      
+      // Handle division by zero and invalid results
+      if (!isFinite(result) || isNaN(result)) {
+        return "ERROR";
+      }
+      
+      // Round to 2 decimal places
+      return Math.round(result * 100) / 100;
+      
+    } catch (e) {
+      console.error('Formula error:', e, 'Formula:', formula);
+      return "ERROR";
+    }
+  }
+
+  // Safe arithmetic expression evaluator (no eval needed)
+  function evaluateExpression(expr) {
+    // Remove all whitespace
+    expr = expr.replace(/\s+/g, '');
+    
+    // Parse and evaluate the expression
+    return parseExpression(expr);
+  }
+
+  function parseExpression(expr) {
+    // Handle addition and subtraction (lowest precedence)
+    let tokens = expr.split(/([+\-])/).filter(t => t);
+    if (tokens.length > 1) {
+      let result = parseTerm(tokens[0]);
+      for (let i = 1; i < tokens.length; i += 2) {
+        const op = tokens[i];
+        const nextVal = parseTerm(tokens[i + 1]);
+        if (op === '+') result += nextVal;
+        else if (op === '-') result -= nextVal;
+      }
+      return result;
+    }
+    return parseTerm(expr);
+  }
+
+  function parseTerm(expr) {
+    // Handle multiplication and division (higher precedence)
+    let tokens = expr.split(/([*\/])/).filter(t => t);
+    if (tokens.length > 1) {
+      let result = parseFactor(tokens[0]);
+      for (let i = 1; i < tokens.length; i += 2) {
+        const op = tokens[i];
+        const nextVal = parseFactor(tokens[i + 1]);
+        if (op === '*') result *= nextVal;
+        else if (op === '/') result /= nextVal;
+      }
+      return result;
+    }
+    return parseFactor(expr);
+  }
+
+  function parseFactor(expr) {
+    // Handle parentheses and numbers
+    expr = expr.trim();
+    
+    // Handle parentheses
+    if (expr.startsWith('(') && expr.endsWith(')')) {
+      return parseExpression(expr.slice(1, -1));
+    }
+    
+    // Handle nested parentheses
+    if (expr.includes('(')) {
+      let depth = 0;
+      let start = -1;
+      for (let i = 0; i < expr.length; i++) {
+        if (expr[i] === '(') {
+          if (depth === 0) start = i;
+          depth++;
+        } else if (expr[i] === ')') {
+          depth--;
+          if (depth === 0) {
+            const inner = parseExpression(expr.slice(start + 1, i));
+            const newExpr = expr.slice(0, start) + inner + expr.slice(i + 1);
+            return parseFactor(newExpr);
+          }
+        }
+      }
+    }
+    
+    // Parse as number
+    const num = Number(expr);
+    if (isNaN(num)) {
+      throw new Error(`Cannot parse: ${expr}`);
+    }
+    return num;
   }
 
   // ── Row selection state ───────────────────────────────────────────────────
@@ -3316,104 +4314,15 @@
   // ── Summary panel ─────────────────────────────────────────────────────────
 
   function renderSummaryPanel() {
-    const area = document.getElementById("csvSummaryArea");
-    if (!area) return;
-    area.innerHTML = "";
-
-    // Controls row
-    const controls = document.createElement("div");
-    controls.className = "csv-summary-controls";
-
-    const label = document.createElement("span");
-    label.className   = "summary-label";
-    label.textContent = "Group by:";
-
-    const select = document.createElement("select");
-    select.className = "summary-select";
-    select.disabled  = !parsedData;
-
-    const ph = document.createElement("option");
-    ph.value       = "";
-    ph.textContent = parsedData ? "Select column…" : "Load a file first";
-    select.appendChild(ph);
-
-    if (parsedData) {
-      getEffectiveFields().filter(f => f !== NOTE_COL).forEach(f => {
-        const opt       = document.createElement("option");
-        opt.value       = f;
-        opt.textContent = viewState.displayNames[f] || f;
-        select.appendChild(opt);
-      });
-      if (lastSummary?.field) select.value = lastSummary.field;
-    }
-
-    const runBtn = document.createElement("button");
-    runBtn.className = "btn btn-secondary";
-    runBtn.style.cssText = "padding:0.2rem 0.55rem;font-size:0.72rem;";
-    runBtn.textContent = "Run";
-    runBtn.disabled    = !parsedData;
-
-    controls.appendChild(label);
-    controls.appendChild(select);
-    controls.appendChild(runBtn);
-    area.appendChild(controls);
-
-    // Results
-    const results = document.createElement("div");
-    results.className = "csv-summary-results";
-    results.id        = "csvSummaryResults";
-    area.appendChild(results);
-
-    runBtn.addEventListener("click", () => {
-      const field = select.value;
-      if (!field) return;
-      lastSummary = computeGroupAndCount(field);
-      renderSummaryResults(results);
-    });
-
-    if (lastSummary?.rows?.length) {
-      renderSummaryResults(results);
+    // Summary has moved to drawer - refresh drawer if it's open on summary panel
+    if (drawerState.open && drawerState.panel === "summary") {
+      renderDrawerPanel("summary");
     }
   }
 
   function renderSummaryResults(container) {
-    container.innerHTML = "";
-    if (!lastSummary?.rows.length) return;
-
-    const dn = viewState.displayNames[lastSummary.field] || lastSummary.field;
-
-    const info = document.createElement("div");
-    info.className   = "summary-info";
-    info.textContent = `Grouped by "${dn}" — ${lastSummary.rows.length.toLocaleString()} distinct values.`;
-    container.appendChild(info);
-
-    const table = document.createElement("table");
-    table.className = "summary-table";
-
-    const thead = document.createElement("thead");
-    const hr    = document.createElement("tr");
-    ["Value", "Count"].forEach((text, i) => {
-      const th = document.createElement("th");
-      th.textContent = text;
-      if (i > 0) th.style.textAlign = "right";
-      hr.appendChild(th);
-    });
-    thead.appendChild(hr);
-    table.appendChild(thead);
-
-    const tbody = document.createElement("tbody");
-    lastSummary.rows.forEach(row => {
-      const tr  = document.createElement("tr");
-      const tdV = document.createElement("td");
-      const tdC = document.createElement("td");
-      tdV.textContent = row.value;
-      tdC.textContent = row.count.toLocaleString();
-      tr.appendChild(tdV);
-      tr.appendChild(tdC);
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    container.appendChild(table);
+    // Legacy function - no longer used since summary moved to drawer
+    // Kept for backward compatibility with any external calls
   }
 
   // ── UI helpers ────────────────────────────────────────────────────────────
@@ -3462,7 +4371,9 @@
 
   // ── Module lifecycle ──────────────────────────────────────────────────────
 
-  function init() {}
+  function init() {
+    loadCalcColumns();
+  }
 
   function show() {
     render();
@@ -3499,6 +4410,7 @@
         filename:     parsedData.filename || "export",
       } : null,
       computeGroupAndCount,
+      computeAggregation,  // Enhanced aggregation engine
     },
   });
 

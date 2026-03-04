@@ -415,19 +415,16 @@ Security Team"
         itemActions.className = "template-item-actions";
         
         const loadBtn = document.createElement("button");
-        loadBtn.className = "btn btn-xs btn-ghost tm-load-btn";
+        loadBtn.className = "btn btn-xs btn-ghost btn-text-info tm-load-btn";
         loadBtn.dataset.id = tmpl.id;
         loadBtn.textContent = "Load";
-        loadBtn.style.color = "#60a5fa";
         const exportBtn = document.createElement("button");
-        exportBtn.className = "btn btn-xs btn-ghost tm-export-btn";
+        exportBtn.className = "btn btn-xs btn-ghost btn-text-accent tm-export-btn";
         exportBtn.dataset.id = tmpl.id;
         exportBtn.textContent = "Export";
-        exportBtn.style.color = "#a78bfa";
         const deleteBtn = document.createElement("button");
-        deleteBtn.className = "btn btn-xs btn-ghost tm-delete-btn";
+        deleteBtn.className = "btn btn-xs btn-ghost btn-text-danger tm-delete-btn";
         deleteBtn.dataset.id = tmpl.id;
-        deleteBtn.style.color = "#f87171";
         deleteBtn.textContent = "Delete";
         
         itemActions.appendChild(loadBtn);
