@@ -2693,3 +2693,204 @@ body {
 .modal-header h3 {
   color: #f9fafb !important;
 }
+
+/* ============================================================
+   DATA EXPLORER MODULE (v0.7.0)
+   ============================================================ */
+
+.module-container--dataExplorer {
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.de-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Toolbar ── */
+.de-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.9rem;
+  border-bottom: 1px solid rgba(148,163,184,0.1);
+  background: rgba(15,23,42,0.6);
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+.de-toolbar-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.de-toolbar-left  { display: flex; align-items: center; gap: 0.5rem; }
+.de-toolbar-right { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+
+/* ── Body layout ── */
+.de-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Sidebar ── */
+.de-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(148,163,184,0.1);
+  background: rgba(15,23,42,0.6);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.6rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.de-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0;
+}
+.de-section-title {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+.de-divider {
+  height: 1px;
+  background: rgba(148,163,184,0.08);
+  margin: 0.15rem 0;
+}
+.de-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0.2rem 0;
+}
+.de-add-btn {
+  font-size: 0.78rem;
+  width: 100%;
+  text-align: center;
+}
+
+/* ── Canvas ── */
+.de-canvas {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+/* ── Empty state ── */
+.de-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  padding: 3rem 1rem;
+}
+.de-empty-icon  { font-size: 2.5rem; opacity: 0.4; }
+.de-empty-title { font-size: 1rem; font-weight: 600; color: var(--text-secondary); }
+.de-empty-hint  { font-size: 0.82rem; }
+
+/* ── KPI Cards ── */
+.de-kpi-row {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.de-kpi-card {
+  background: rgba(30,41,59,0.8);
+  border: 1px solid rgba(148,163,184,0.12);
+  border-radius: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  min-width: 130px;
+  flex: 1;
+}
+.de-kpi-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #f9fafb;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.de-kpi-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #d1d5db;
+  margin-top: 0.3rem;
+}
+.de-kpi-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+/* ── Chart Grid ── */
+.de-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 0.8rem;
+}
+.de-chart-wrap {
+  background: rgba(30,41,59,0.6);
+  border: 1px solid rgba(148,163,184,0.1);
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.8rem 0.5rem;
+  min-width: 0;
+}
+.de-chart-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #d1d5db;
+  margin-bottom: 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Presentation Mode ── */
+.de-presentation {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: #0f172a;
+}
+.de-presentation .de-sidebar {
+  display: none;
+}
+.de-presentation .de-canvas {
+  padding: 1.5rem;
+}
+.de-presentation .de-kpi-value {
+  font-size: 2.5rem;
+}
+.de-presentation .de-chart-grid {
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+}
+.de-presentation .de-chart-wrap > div {
+  height: 380px !important;
+}
+
+/* Chart size variants */
+.de-chart-wrap--sm   { grid-column: span 1; }
+.de-chart-wrap       { grid-column: span 1; }
+.de-chart-wrap--lg   { grid-column: span 2; }
+.de-chart-wrap--full { grid-column: 1 / -1; }
