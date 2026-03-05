@@ -774,6 +774,7 @@
     const isIndexed = ["bar","line","radar","polarArea","scatter","bubble"].includes(type);
     const realType  = type === "horizontalBar" ? "bar" : type;
 
+    // For scatter/bubble, we need point data - but use actual labels on X-axis via ticks
     const isScatterType = ["scatter", "bubble"].includes(type);
     const chartData = isScatterType 
       ? values.map((y, i) => ({ x: i, y, r: type === "bubble" ? Math.sqrt(y) * 2 : undefined }))
@@ -782,7 +783,7 @@
     const config = {
       type: realType,
       data: {
-        labels: isScatterType ? undefined : labels,
+        labels: labels,
         datasets: [{
           label: chartDef.title || "Count",
           data: chartData,
@@ -800,35 +801,15 @@
         indexAxis: type === "horizontalBar" ? "y" : "x",
         plugins: {
           legend: {
-            display: chartDef.showLegend !== false,  // Show legend for ALL chart types
-            labels: isIndexed ? {
-              // Custom legend for bar/line/scatter/bubble - show each category
-              generateLabels: function(chart) {
-                const dataset = chart.data.datasets[0];
-                return labels.map((label, i) => ({
-                  text: label,
-                  fillStyle: colors[i],
-                  strokeStyle: colors[i],
-                  lineWidth: 1,
-                  hidden: false,
-                  index: i,
-                  fontColor: '#f9fafb'  // Add explicit font color to each label
-                }));
-              },
-              color: "#f9fafb",  // Bright white instead of light gray
-              font: { size: 11, weight: '500' },
-              padding: 8,
-              boxWidth: 12,
-              boxHeight: 12,
-            } : { 
-              // Default legend for pie/doughnut
-              color: "#f9fafb",  // Bright white
+            display: chartDef.showLegend !== false,
+            labels: { 
+              color: "#f9fafb",
               font: { size: 11, weight: '500' },
               padding: 12,
               boxWidth: 15,
               boxHeight: 15
             },
-            position: 'top',  // Consistent position
+            position: 'top',
           },
           title: {
             display: false,
@@ -836,7 +817,7 @@
           tooltip: isScatterType ? {
             callbacks: {
               label: function(context) {
-                const index = context.parsed.x;
+                const index = context.dataIndex;
                 const label = labels[index] || 'Unknown';
                 const value = context.parsed.y;
                 return label + ": " + value;
@@ -847,8 +828,11 @@
         scales: isIndexed ? {
           x: { 
             ticks: { 
-              color: "#d1d5db",  // Light gray for visibility
-              callback: isScatterType ? (val, index) => labels[index] || val : undefined
+              color: "#d1d5db",
+              // For all chart types: show actual category labels, not indices
+              callback: function(val, index) {
+                return labels[index] !== undefined ? labels[index] : val;
+              }
             }, 
             grid: { color: "rgba(255,255,255,0.06)" } 
           },
@@ -946,7 +930,13 @@
         const isPie  = ["pie","doughnut","polarArea","radar"].includes(chartDef.type);
         const noteHtml = chartDef.note ? '<p class="chart-note">' + escHtml(chartDef.note) + '</p>' : '';
         
-        return '\n  <div class="chart-card">\n    <h2 class="chart-title">' + escHtml(chartDef.title || "Chart") + '</h2>\n    <p class="chart-meta">Grouped by: <strong>' + escHtml(chartDef.fieldLabel || chartDef.field) + '</strong> &mdash; ' + chartDef.data.length + ' distinct values</p>\n    <div class="chart-wrap ' + (isPie ? "chart-wrap--pie" : "") + '">\n      <canvas id="' + id + '"></canvas>\n    </div>\n    ' + noteHtml + '\n  </div>\n  <script>\n    (function(){\n      const ctx = document.getElementById(\'' + id + '\').getContext(\'2d\');\n      new Chart(ctx, ' + JSON.stringify(config) + ');\n    })();\n  <\/script>';
+        // Build aggregation label
+        let aggLabel = "COUNT";
+        if (chartDef.valueColumn && chartDef.aggType && chartDef.aggType !== "count") {
+          aggLabel = chartDef.aggType.toUpperCase() + "(" + chartDef.valueColumn + ")";
+        }
+        
+        return '\n  <div class="chart-card">\n    <h2 class="chart-title">' + escHtml(chartDef.title || "Chart") + '</h2>\n    <p class="chart-meta"><strong>' + escHtml(aggLabel) + '</strong> by ' + escHtml(chartDef.fieldLabel || chartDef.field) + ' &mdash; ' + chartDef.data.length + ' distinct values</p>\n    <div class="chart-wrap ' + (isPie ? "chart-wrap--pie" : "") + '">\n      <canvas id="' + id + '"></canvas>\n    </div>\n    ' + noteHtml + '\n  </div>\n  <script>\n    (function(){\n      const ctx = document.getElementById(\'' + id + '\').getContext(\'2d\');\n      new Chart(ctx, ' + JSON.stringify(config) + ');\n    })();\n  <\/script>';
       }
     }).join("\n");
 
@@ -957,6 +947,100 @@
     const a    = document.createElement("a");
     a.href     = url;
     a.download = (reportTitle || "report").replace(/[^a-z0-9_-]/gi, "-").toLowerCase() + ".html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportReportXlsx() {
+    if (!reportCharts.length) return;
+
+    const wb = XLSX.utils.book_new();
+    
+    // Add a summary sheet with report metadata
+    const summaryData = [
+      ["Report Title", reportTitle],
+      ["Generated", new Date().toLocaleString()],
+      ["Total Charts", reportCharts.length],
+      [""],
+      ["Chart Index"],
+      ["#", "Chart Title", "Type", "Grouped By", "Distinct Values"]
+    ];
+    
+    reportCharts.forEach((chart, idx) => {
+      const chartNum = idx + 1;
+      const title = chart.title || `Chart ${chartNum}`;
+      const type = chart.type || "Unknown";
+      const field = chart.fieldLabel || chart.field || "Unknown";
+      const valueCount = chart.data ? chart.data.length : 0;
+      summaryData.push([chartNum, title, type, field, valueCount]);
+    });
+    
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
+    
+    // Add a sheet for each chart's data
+    reportCharts.forEach((chartDef, idx) => {
+      const chartNum = idx + 1;
+      let sheetName = (chartDef.title || `Chart ${chartNum}`).substring(0, 31); // Excel sheet name limit
+      
+      // Ensure unique sheet names
+      let finalName = sheetName;
+      let suffix = 1;
+      while (wb.SheetNames.includes(finalName)) {
+        const maxLen = 31 - String(suffix).length - 1; // -1 for underscore
+        finalName = sheetName.substring(0, maxLen) + "_" + suffix;
+        suffix++;
+      }
+      
+      let sheetData = [];
+      
+      if (chartDef.isComparison) {
+        // Comparison chart - combine both datasets
+        sheetData.push(["Category", comparisonMode.datasetA.name || "Dataset A", comparisonMode.datasetB.name || "Dataset B"]);
+        
+        if (chartDef.mode === "overlay") {
+          const allLabels = [...new Set([...chartDef.dataA.map(d => d.label), ...chartDef.dataB.map(d => d.label)])];
+          allLabels.forEach(label => {
+            const valA = chartDef.dataA.find(d => d.label === label)?.value || 0;
+            const valB = chartDef.dataB.find(d => d.label === label)?.value || 0;
+            sheetData.push([label, valA, valB]);
+          });
+        } else {
+          // Side-by-side: show both datasets stacked
+          sheetData.push([comparisonMode.datasetA.name || "Dataset A"]);
+          sheetData.push(["Category", "Value"]);
+          chartDef.dataA.forEach(d => sheetData.push([d.label, d.value]));
+          sheetData.push([]);
+          sheetData.push([comparisonMode.datasetB.name || "Dataset B"]);
+          sheetData.push(["Category", "Value"]);
+          chartDef.dataB.forEach(d => sheetData.push([d.label, d.value]));
+        }
+      } else {
+        // Standard chart
+        const fieldLabel = chartDef.fieldLabel || chartDef.field || "Category";
+        const valueLabel = chartDef.valueColumn 
+          ? `${chartDef.aggType || "count"}(${chartDef.valueColumn})`
+          : "Count";
+        
+        sheetData.push([fieldLabel, valueLabel]);
+        chartDef.data.forEach(d => {
+          sheetData.push([d.label, d.value]);
+        });
+      }
+      
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+      XLSX.utils.book_append_sheet(wb, ws, finalName);
+    });
+    
+    // Generate and download the file
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (reportTitle || "report").replace(/[^a-z0-9_-]/gi, "-").toLowerCase() + ".xlsx";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -974,7 +1058,7 @@
 
     const root = document.createElement("div");
     root.className = "rb-root";
-    root.innerHTML = '<div class="rb-header"><div class="rb-header-left"><input type="text" class="rb-title-input" id="rbTitleInput" value="' + escHtml(reportTitle) + '" placeholder="Report title…"></div><div class="rb-header-right"><button class="btn btn-secondary btn-sm" id="rbComparisonBtn" style="margin-right:0.5rem;">' + (comparisonMode.enabled ? '🔴 Exit Comparison' : '📊 Comparison Mode') + '</button><button class="btn btn-secondary btn-sm" id="rbTemplatesBtn">📋 Templates</button><button class="btn btn-secondary btn-sm" id="rbClearBtn" ' + (!reportCharts.length ? "disabled" : "") + '>Clear all</button><button class="btn btn-sm" id="rbExportBtn" ' + (!reportCharts.length ? "disabled" : "") + '>⬆ Export HTML</button></div></div>' + (comparisonMode.enabled ? buildComparisonUI() : buildStandardUI(sessionData, hasData)) + '';
+    root.innerHTML = '<div class="rb-header"><div class="rb-header-left"><input type="text" class="rb-title-input" id="rbTitleInput" value="' + escHtml(reportTitle) + '" placeholder="Report title…"></div><div class="rb-header-right"><button class="btn btn-secondary btn-sm" id="rbComparisonBtn" style="margin-right:0.5rem;">' + (comparisonMode.enabled ? '🔴 Exit Comparison' : '📊 Comparison Mode') + '</button><button class="btn btn-secondary btn-sm" id="rbTemplatesBtn">📋 Templates</button><button class="btn btn-secondary btn-sm" id="rbClearBtn" ' + (!reportCharts.length ? "disabled" : "") + '>Clear all</button><button class="btn btn-secondary btn-sm" id="rbExportXlsxBtn" ' + (!reportCharts.length ? "disabled" : "") + '>📊 Export XLSX</button><button class="btn btn-sm" id="rbExportBtn" ' + (!reportCharts.length ? "disabled" : "") + '>⬆ Export HTML</button></div></div>' + (comparisonMode.enabled ? buildComparisonUI() : buildStandardUI(sessionData, hasData)) + '';
     container.appendChild(root);
 
     const titleInput = root.querySelector("#rbTitleInput");
@@ -995,6 +1079,7 @@
     root.querySelector("#rbTemplatesBtn").addEventListener("click", openTemplateManager);
 
     root.querySelector("#rbExportBtn").addEventListener("click", exportReportHtml);
+    root.querySelector("#rbExportXlsxBtn").addEventListener("click", exportReportXlsx);
     root.querySelector("#rbClearBtn").addEventListener("click", function() {
       reportCharts = [];
       chartInstances = {};
@@ -1147,6 +1232,7 @@
       syncAggregationState();
 
       root.querySelector("#rbExportBtn").disabled = false;
+      root.querySelector("#rbExportXlsxBtn").disabled = false;
       root.querySelector("#rbClearBtn").disabled  = false;
 
       const emptyEl = root.querySelector(".rb-canvas-empty");
@@ -1557,6 +1643,7 @@
       if (rbCanvas && !rbCanvas.querySelector(".rb-chart-card")) {
         rbCanvas.innerHTML = '<div class="rb-canvas-empty"><div class="rb-empty-icon">📈</div><div class="rb-empty-text">Comparison charts will appear here.</div></div>';
         document.getElementById("rbExportBtn").disabled = true;
+        document.getElementById("rbExportXlsxBtn").disabled = true;
         document.getElementById("rbClearBtn").disabled = true;
       }
     });
@@ -1592,7 +1679,16 @@
     
     const cardMeta = document.createElement("div");
     cardMeta.className = "rb-chart-card-meta";
-    cardMeta.textContent = "Grouped by " + (chartDef.fieldLabel || chartDef.field) + " — " + chartDef.data.length + " values";
+    
+    // Build aggregation label
+    let aggLabel = "COUNT";
+    if (chartDef.valueColumn && chartDef.aggType && chartDef.aggType !== "count") {
+      const valueLabel = chartDef.valueColumn; // Could use displayNames if available
+      aggLabel = chartDef.aggType.toUpperCase() + "(" + valueLabel + ")";
+    }
+    
+    const metaText = aggLabel + " by " + (chartDef.fieldLabel || chartDef.field) + " — " + chartDef.data.length + " values";
+    cardMeta.innerHTML = '<strong>' + escHtml(aggLabel) + '</strong> by ' + escHtml(chartDef.fieldLabel || chartDef.field) + ' — ' + chartDef.data.length + ' values';
     
     cardHeader.appendChild(cardTitle);
     cardHeader.appendChild(cardMeta);
@@ -1647,6 +1743,7 @@
       if (rbCanvas && !rbCanvas.querySelector(".rb-chart-card")) {
         rbCanvas.innerHTML = '<div class="rb-canvas-empty"><div class="rb-empty-icon">📈</div><div class="rb-empty-text">Charts you add will appear here.</div></div>';
         document.getElementById("rbExportBtn").disabled = true;
+        document.getElementById("rbExportXlsxBtn").disabled = true;
         document.getElementById("rbClearBtn").disabled  = true;
       }
     });

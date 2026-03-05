@@ -647,13 +647,13 @@
     const rows = lastSummary.rows;
     
     // Build table headers
-    let headers = `<th>${escHtml(dn)}</th><th>Count</th>`;
+    let headers = `<th>${escHtml(dn)}</th><th><strong>COUNT</strong></th>`;
     if (lastSummary.includePercentage) {
       headers += `<th>% of Total</th>`;
     }
     if (lastSummary.aggregations?.length) {
       lastSummary.aggregations.forEach(agg => {
-        headers += `<th>${escHtml(agg.label)}</th>`;
+        headers += `<th><strong>${escHtml(agg.label)}</strong></th>`;
       });
     }
     
@@ -3436,7 +3436,9 @@
     
     // Count column
     const thCount = document.createElement("th");
-    thCount.textContent = "Count";
+    const countStrong = document.createElement("strong");
+    countStrong.textContent = "COUNT";
+    thCount.appendChild(countStrong);
     thCount.style.cssText = "text-align:right;font-size:0.7rem;";
     hr.appendChild(thCount);
     
@@ -3452,7 +3454,9 @@
     if (lastSummary.aggregations?.length) {
       lastSummary.aggregations.forEach(agg => {
         const th = document.createElement("th");
-        th.textContent = agg.label;
+        const aggStrong = document.createElement("strong");
+        aggStrong.textContent = agg.label;
+        th.appendChild(aggStrong);
         th.style.cssText = "text-align:right;font-size:0.7rem;";
         hr.appendChild(th);
       });

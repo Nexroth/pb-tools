@@ -94,19 +94,44 @@
             <img src="assets/icons/pb-tools-3d.png" 
                  alt="PB Tools" 
                  style="width: 120px; height: auto; margin: 0 auto 1rem; display: block;">
-            <h3 style="margin: 0 0 0.5rem; font-size: 1.3rem; color: var(--text-primary);">
+            <h3 style="margin: 0 0 0.25rem; font-size: 1.3rem; color: var(--text-primary);">
               PB Tools
             </h3>
-            <p style="color: var(--text-secondary); margin: 0 0 1rem; font-size: 0.9rem;">
+            <p style="color: var(--text-muted); margin: 0 0 0.5rem; font-size: 0.8rem;">
+              Version 0.6.2 &bull; Local only
+            </p>
+            <p style="color: var(--text-secondary); margin: 0 0 0.5rem; font-size: 0.9rem;">
               Security Operations Toolset
             </p>
-            <p class="info-text" style="margin: 0; line-height: 1.6;">
-              Internal helper app for CSV workflows, phishing analysis, 
-              email templating, and security operations tasks.
+            <p style="color: var(--text-muted); margin: 0 0 1rem; font-size: 0.85rem;">
+              Developer: Raf
             </p>
-            <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); 
-                        font-size: 0.85rem; color: var(--text-muted);">
-              Version 0.6.1 &bull; Local only
+            <p class="info-text" style="margin: 0 0 1.5rem; line-height: 1.6;">
+              Internal helper app for CSV workflows, data analysis, 
+              building charts and reports, email templating, and security operations tasks.
+            </p>
+            
+            <div style="text-align: left; max-width: 600px; margin: 0 auto; padding-top: 1rem; 
+                        border-top: 1px solid var(--border);">
+              <h4 style="margin: 0 0 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+                Modules
+              </h4>
+              <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; 
+                         line-height: 1.8; color: var(--text-primary);">
+                <li><strong>CSV Workbench</strong> – Analyze large CSV and XLS exports, incident logs, and security data. Filter by columns, calculate values across groups, create reusable presets for recurring analysis workflows, and track remediation status with custom note fields.</li>
+                
+                <li><strong>Report Builder</strong> – Turn your CSV data into executive-ready visualizations. Compare metrics across departments, track trends over time, spot outliers in user behavior, and generate standalone HTML reports with multiple charts that can be shared with stakeholders or embedded in documentation.</li>
+                
+                <li><strong>Email Templater</strong> – Standardize your communications. Build templates for notifications, user advisories, and incident responses with dynamic fields that auto-populate from tables. Paste directly into Outlook or Gmail with formatting intact—no manual copying or reformatting.</li>
+                
+                <li><strong>EML Analyzer</strong> – Quickly triage suspicious emails without opening them in your mail client. Trace the full email journey through mail servers, validate SPF/DKIM/DMARC to spot spoofing attempts, extract all links and attachments for investigation, and detect PhishER-wrapped training emails to avoid false positives.</li>
+                
+                <li><strong>Hash Generator</strong> – Generate file fingerprints for malware analysis and evidence documentation. Drag in suspicious files to get MD5, SHA-1, SHA-256, and SHA-512 hashes instantly—useful for cross-referencing against threat intelligence databases or verifying file integrity during forensic investigations.</li>
+                
+                <li><strong>Base64 Toolkit</strong> – Decode suspicious content hiding in plain sight. Phishing emails often use Base64 to obfuscate malicious URLs or embed images—this tool decodes them instantly. Also useful for examining encoded PowerShell commands, data exfiltration payloads, or any other encoded content found during investigations.</li>
+                
+                <li><strong>QR Analyzer</strong> – Investigate QR code-based phishing attacks. Upload images containing QR codes to extract and analyze the embedded URLs. Identifies suspicious domains, URL shorteners, and redirect chains commonly used in quishing campaigns.</li>
+              </ul>
             </div>
           </div>
         </div>
