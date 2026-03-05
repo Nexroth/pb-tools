@@ -1,8 +1,23 @@
+# Build artifacts (generated zip files)
+pb-tools-*.zip
+temp-release/
+
+# Build scripts - not needed in repo (users download pre-built zips)
+build-release.js
+build-release.sh
+build-release.bat
+build-release.ps1
+package.json
+BUILD.md
+
 # OS/editor cruft
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # Obsidian vault files
 .obsidian/
@@ -15,10 +30,16 @@ projectdocs/
 
 # Test data — never commit real or dummy data
 test files/
+sample_files/
 
 # Logs
 *.log
+npm-debug.log*
 
 # Build/output (if added later)
 dist/
 node_modules/
+
+# Environment files
+.env
+.env.local

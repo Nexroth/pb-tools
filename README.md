@@ -11,7 +11,7 @@ PB Tools is a single-page web application providing security analysts with offli
 ## Modules
 
 ### CSV Workbench
-Analyze large CSV and Excel exports, incident logs, and security data.
+Analyze large phishing campaign exports, incident logs, and security data.
 
 **Features:**
 - CSV and XLSX import with drag-and-drop
@@ -161,7 +161,8 @@ Access at `http://localhost:8000`
 │   ├── papaparse.min.js   # CSV parsing
 │   ├── xlsx.full.min.js   # XLSX import/export
 │   └── chart.umd.js       # Chart.js for visualizations
-└── [module files]
+├── assets/                 # Icons, images, fonts
+└── modules/                # Application modules
     ├── csvWorkbench.js
     ├── reportBuilder.js
     ├── emailTemplater.js

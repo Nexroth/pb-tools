@@ -1,0 +1,25 @@
+Department,Campaign Type,Status,Recipients,Clicked,Reported
+IT,Email Phishing,Completed,150,12,8
+HR,Email Phishing,Completed,85,18,4
+Finance,Email Phishing,Completed,45,3,12
+Marketing,Email Phishing,Completed,120,22,6
+Operations,Email Phishing,Completed,95,15,9
+IT,SMS Phishing,Completed,150,8,15
+HR,SMS Phishing,Completed,85,14,6
+Finance,SMS Phishing,Completed,45,2,18
+Marketing,SMS Phishing,Completed,120,19,8
+Operations,SMS Phishing,Completed,95,11,12
+IT,Vishing,Completed,150,5,22
+HR,Vishing,Completed,85,9,10
+Finance,Vishing,Completed,45,1,25
+Marketing,Vishing,Completed,120,14,15
+Operations,Vishing,Completed,95,7,18
+Sales,Email Phishing,Completed,110,25,5
+Sales,SMS Phishing,Completed,110,20,7
+Sales,Vishing,Completed,110,12,14
+Engineering,Email Phishing,Completed,200,16,28
+Engineering,SMS Phishing,Completed,200,10,35
+Engineering,Vishing,Completed,200,6,42
+Legal,Email Phishing,Completed,30,5,3
+Legal,SMS Phishing,Completed,30,3,6
+Legal,Vishing,Completed,30,2,8
