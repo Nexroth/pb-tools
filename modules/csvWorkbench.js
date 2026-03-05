@@ -12,10 +12,7 @@
 
   // Protected columns are now determined dynamically based on active note key config
   // Plus some always-protected columns
-  const ALWAYS_PROTECTED = new Set([
-    "Manager Email",
-    "EmployeeID"
-  ]);
+  const ALWAYS_PROTECTED = new Set(); // No hardcoded columns — use manual protection or Note Key auto-protection
 
   // ── Module meta ───────────────────────────────────────────────────────────
   const meta = {
@@ -38,28 +35,31 @@
   let filterState   = { text: "", field: "" };  // "" field = search all columns
   let rowFilters    = [];  // [{ field, op, value }] — preset-applied exact filters; op: "eq"|"neq"|"contains"|"empty"|"notempty"
   let calcColumns   = [];  // [{ id, name, formula }] — calculated column definitions
+  let manuallyProtectedColumns = new Set(); // User-toggled via right-click → persisted in presets
 
   // ── Drawer state ──────────────────────────────────────────────────────────
   let drawerState   = { open: false, panel: null };
 
   const PANEL_LABELS = {
-    columns:  "Columns",
-    presets:  "Presets",
-    mapping:  "Value mapping",
-    tools:    "Tools",
-    notekeys: "Note Keys",
-    calc:     "Calculations",
-    summary:  "Summary",
+    columns:   "Columns",
+    presets:   "Presets",
+    mapping:   "Value mapping",
+    tools:     "Tools",
+    notekeys:  "Note Keys",
+    reference: "References",
+    formulas:  "Formulas",
+    summary:   "Summary",
   };
 
   const PANEL_ICONS = {
-    columns:  "☰",
-    presets:  "⚡",
-    mapping:  "⇄",
-    tools:    "🔧",
-    notekeys: "🔑",
-    calc:     "🧮",
-    summary:  "📊",
+    columns:   "☰",
+    presets:   "⚡",
+    mapping:   "⇄",
+    tools:     "🔧",
+    notekeys:  "🔑",
+    reference: "📋",
+    formulas:  "🧮",
+    summary:   "📊",
   };
 
   // ── Annotation cache ──────────────────────────────────────────────────────
@@ -179,7 +179,7 @@
   }
 
   function getProtectedColumns() {
-    const protected = new Set(ALWAYS_PROTECTED);
+    const protected = new Set([...ALWAYS_PROTECTED, ...manuallyProtectedColumns]);
     const activeConfig = getActiveNoteConfig();
     
     if (activeConfig?.keyColumns) {
@@ -532,6 +532,7 @@
     sortState   = { field: null, dir: "asc" };
     filterState = { text: "", field: "" };
     rowFilters  = [];
+    manuallyProtectedColumns = new Set();
     selectedRows.clear();
     lastSelectedRow = null;
     viewState = {
@@ -854,7 +855,7 @@
         <div class="csv-row-filter-bar" id="csvRowFilterBar" style="display:none;"></div>
 
         <!-- Workspace: rail | drawer | content -->
-        <div class="csv-workspace">
+        <div class="csv-workspace" id="csvWorkspace">
 
           <div class="ops-rail" id="opsRail">
             ${Object.entries(PANEL_ICONS).map(([key, icon]) => `
@@ -1119,13 +1120,14 @@
     if (!body) return;
     body.innerHTML = "";
     switch (panel) {
-      case "columns":  buildColumnsPanel(body);  break;
-      case "presets":  buildPresetsPanel(body);  break;
-      case "mapping":  buildMappingPanel(body);  break;
-      case "notekeys": buildNoteKeysPanel(body); break;
-      case "calc":     buildCalcColumnsPanel(body); break;
-      case "tools":    buildToolsPanel(body);    break;
-      case "summary":  buildSummaryPanel(body);  break;
+      case "columns":   buildColumnsPanel(body);     break;
+      case "presets":   buildPresetsPanel(body);     break;
+      case "mapping":   buildMappingPanel(body);     break;
+      case "notekeys":  buildNoteKeysPanel(body);    break;
+      case "tools":     buildToolsPanel(body);       break;
+      case "reference": buildReferencePanel(body);   break;
+      case "formulas":  buildCalcColumnsPanel(body); break;
+      case "summary":   buildSummaryPanel(body);     break;
     }
   }
 
@@ -1213,6 +1215,18 @@
       renameFields: renames,
       valueMapping: valueMappings,
       rowFilters:   capturedRowFilters || [],
+      protectedColumns: [...manuallyProtectedColumns],
+      // Save full formula column definitions so they restore on apply
+      calcColumns: calcColumns.map(c => ({ ...c })),
+      // Record which reference table IDs are used (for validation on apply)
+      referencedTableIds: (() => {
+        const ids = new Set();
+        calcColumns.forEach(c => {
+          const matches = (c.formula || "").matchAll(/LOOKUP\s*\(\s*['"]([^'"]+)['"]/gi);
+          for (const m of matches) ids.add(m[1]);
+        });
+        return [...ids];
+      })(),
       isUserPreset: true,
       savedAt:      Date.now(),
     };
@@ -1719,6 +1733,65 @@
     // Apply row filters
     rowFilters = (preset.rowFilters || []).filter(rf => rf.field && rf.op);
     renderRowFilterBadges();
+
+    // Restore manually protected columns (only those that exist in the loaded data)
+    const currentFields = new Set(parsedData.fields);
+    manuallyProtectedColumns = new Set(
+      (preset.protectedColumns || []).filter(f => currentFields.has(f))
+    );
+
+    // Warn if preset references missing reference tables
+    const missingTables = (preset.referencedTableIds || []).filter(id => {
+      const tables = loadReferenceTables();
+      return !tables[id];
+    });
+    if (missingTables.length > 0) {
+      console.warn(`[PB Tools] Preset references missing reference tables: ${missingTables.join(", ")}. Formula columns using LOOKUP may return errors.`);
+      // Non-blocking — user will see ERROR in cells if lookup fails
+    }
+
+    // Restore formula columns
+    if (preset.calcColumns && preset.calcColumns.length > 0) {
+      // Clear any existing calc columns from parsedData first
+      calcColumns.forEach(existing => {
+        const idx = parsedData.fields.indexOf(existing.name);
+        if (idx !== -1) parsedData.fields.splice(idx, 1);
+        parsedData.rows.forEach(row => delete row[existing.name]);
+        const visIdx = viewState.visibleFields.indexOf(existing.name);
+        if (visIdx !== -1) viewState.visibleFields.splice(visIdx, 1);
+        delete viewState.displayNames[existing.name];
+      });
+
+      // Only restore formulas whose referenced columns exist in the loaded data
+      const allFields = new Set(parsedData.fields);
+      const skipped = [];
+      calcColumns = preset.calcColumns.filter(c => {
+        // Check all {ColRef} references exist
+        const refs = (c.formula || "").match(/\{([^}]+)\}/g) || [];
+        const missing = refs.map(r => r.slice(1,-1)).filter(f => !allFields.has(f));
+        if (missing.length > 0) { skipped.push(`${c.name} (missing: ${missing.join(", ")})`); return false; }
+        return true;
+      });
+
+      if (skipped.length > 0) {
+        console.warn(`[PB Tools] Skipped formula columns (columns not in CSV): ${skipped.join("; ")}`);
+      }
+
+      saveCalcColumns();
+      applyCalcColumns();
+
+      // Make restored formula columns visible
+      calcColumns.forEach(c => {
+        if (!viewState.visibleFields.includes(c.name)) {
+          viewState.visibleFields.push(c.name);
+        }
+        viewState.displayNames[c.name] = c.name;
+      });
+    } else {
+      // No formula columns in preset — clear any active ones
+      calcColumns = [];
+      saveCalcColumns();
+    }
 
     viewState.activePreset = preset.id;
     updateFileInfo();
@@ -2976,217 +3049,1213 @@
     });
   }
 
-  // ── Calculations Panel ──────────────────────────────────────────────
-  function buildCalcColumnsPanel(container) {
-    if (!parsedData) {
-      noDataMessage(container, "Load a CSV file to create calculated columns.");
+
+  // ── Reference Tables Storage ─────────────────────────────────────────────
+  const REFERENCE_TABLES_KEY = "pbTools_referenceTables";
+
+  function loadReferenceTables() {
+    try {
+      const raw = localStorage.getItem(REFERENCE_TABLES_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+  }
+
+  function saveReferenceTables(tables) {
+    try {
+      localStorage.setItem(REFERENCE_TABLES_KEY, JSON.stringify(tables));
+    } catch (_) {}
+  }
+
+  // ── Reference Tables Panel ───────────────────────────────────────────────
+  function buildReferencePanel(container) {
+    const tables = loadReferenceTables();
+    const tableIds = Object.keys(tables);
+
+    // ── Header actions ────────────────────────────────────────────────────
+    const headerSection = panelSection(null);
+    headerSection.style.cssText = "display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.25rem;";
+
+    const newBtn = document.createElement("button");
+    newBtn.className = "btn btn-sm";
+    newBtn.textContent = "+ New Table";
+    newBtn.addEventListener("click", () => showReferenceTableEditor(null, container));
+
+    const importBtn = document.createElement("button");
+    importBtn.className = "btn btn-secondary btn-sm";
+    importBtn.textContent = "Import CSV";
+    importBtn.title = "Import a reference table from a CSV file";
+    importBtn.addEventListener("click", () => {
+      const inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = ".csv";
+      inp.addEventListener("change", () => {
+        const file = inp.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const parsed = Papa.parse(e.target.result.trim(), { header: true, skipEmptyLines: true });
+            if (!parsed.data.length || !parsed.meta.fields.length) {
+              alert("CSV appears empty or invalid.");
+              return;
+            }
+            // Show editor pre-populated with this data
+            showReferenceTableEditor(null, container, {
+              name: file.name.replace(/\.csv$/i, ""),
+              fields: parsed.meta.fields,
+              data: parsed.data,
+            });
+          } catch (err) {
+            alert("Could not parse CSV: " + err.message);
+          }
+        };
+        reader.readAsText(file);
+      });
+      inp.click();
+    });
+
+    const exportAllBtn = document.createElement("button");
+    exportAllBtn.className = "btn btn-secondary btn-sm";
+    exportAllBtn.textContent = "Export All";
+    exportAllBtn.title = "Export all reference tables as JSON";
+    exportAllBtn.disabled = tableIds.length === 0;
+    exportAllBtn.addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(tables, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "reference_tables.json";
+      a.click();
+    });
+
+    headerSection.appendChild(newBtn);
+    headerSection.appendChild(importBtn);
+    headerSection.appendChild(exportAllBtn);
+    container.appendChild(headerSection);
+
+    const divider = document.createElement("div");
+    divider.className = "panel-divider";
+    container.appendChild(divider);
+
+    // ── Table list ────────────────────────────────────────────────────────
+    if (tableIds.length === 0) {
+      noDataMessage(container, "No reference tables yet. Create one or import from CSV.");
       return;
     }
 
-    // Load saved calculations
+    tableIds.forEach(id => {
+      const tbl = tables[id];
+      const card = document.createElement("div");
+      card.className = "calc-column-item";
+      card.style.cssText = "padding:0.6rem;background:var(--bg-tertiary);border-radius:0.35rem;margin-bottom:0.6rem;";
+
+      // Card header row
+      const cardHeader = document.createElement("div");
+      cardHeader.style.cssText = "display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;";
+
+      const meta = document.createElement("div");
+      meta.style.flex = "1";
+
+      const nameEl = document.createElement("div");
+      nameEl.style.cssText = "font-weight:600;color:var(--text-primary);font-size:0.9rem;";
+      nameEl.textContent = tbl.name;
+
+      const metaEl = document.createElement("div");
+      metaEl.style.cssText = "font-size:0.75rem;color:var(--text-muted);margin-top:0.1rem;";
+      const rowCount = tbl.data ? tbl.data.length : 0;
+      const cols = tbl.fields ? tbl.fields.join(", ") : "";
+      metaEl.textContent = `${rowCount} row${rowCount !== 1 ? "s" : ""} · ${cols}`;
+      if (tbl.lastUpdated) {
+        metaEl.textContent += ` · Updated ${tbl.lastUpdated}`;
+      }
+
+      meta.appendChild(nameEl);
+      meta.appendChild(metaEl);
+
+      const actions = document.createElement("div");
+      actions.style.cssText = "display:flex;gap:0.3rem;flex-shrink:0;";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn btn-ghost btn-xs";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => showReferenceTableEditor(id, container));
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "btn btn-ghost btn-xs btn-text-danger";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => {
+        if (confirm(`Delete reference table "${tbl.name}"? This cannot be undone.`)) {
+          const all = loadReferenceTables();
+          delete all[id];
+          saveReferenceTables(all);
+          renderDrawerPanel("reference");
+          if (parsedData && calcColumns.length > 0) {
+            applyCalcColumns();
+            renderTablePreview();
+          }
+        }
+      });
+
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+
+      cardHeader.appendChild(meta);
+      cardHeader.appendChild(actions);
+      card.appendChild(cardHeader);
+
+      // Inline preview (first 3 rows)
+      if (tbl.data && tbl.data.length && tbl.fields && tbl.fields.length) {
+        const preview = document.createElement("div");
+        preview.style.cssText = "margin-top:0.5rem;overflow-x:auto;";
+        const previewTable = document.createElement("table");
+        previewTable.style.cssText = "border-collapse:collapse;font-size:0.75rem;width:100%;";
+
+        // Header
+        const thead = document.createElement("thead");
+        const htr = document.createElement("tr");
+        tbl.fields.forEach(f => {
+          const th = document.createElement("th");
+          th.textContent = f;
+          th.style.cssText = "padding:0.2rem 0.4rem;text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border-color);white-space:nowrap;";
+          htr.appendChild(th);
+        });
+        thead.appendChild(htr);
+        previewTable.appendChild(thead);
+
+        // Up to 3 rows
+        const tbody = document.createElement("tbody");
+        tbl.data.slice(0, 3).forEach(row => {
+          const tr = document.createElement("tr");
+          tbl.fields.forEach(f => {
+            const td = document.createElement("td");
+            td.textContent = row[f] ?? "";
+            td.style.cssText = "padding:0.2rem 0.4rem;color:var(--text-secondary);white-space:nowrap;";
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        if (tbl.data.length > 3) {
+          const tr = document.createElement("tr");
+          const td = document.createElement("td");
+          td.colSpan = tbl.fields.length;
+          td.textContent = `… ${tbl.data.length - 3} more row${tbl.data.length - 3 !== 1 ? "s" : ""}`;
+          td.style.cssText = "padding:0.2rem 0.4rem;color:var(--text-muted);font-style:italic;";
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+        }
+        previewTable.appendChild(tbody);
+        preview.appendChild(previewTable);
+        card.appendChild(preview);
+      }
+
+      container.appendChild(card);
+    });
+  }
+
+  // ── Reference Table Editor ────────────────────────────────────────────────
+  function showReferenceTableEditor(tableId, panelContainer, prefill) {
+    const isNew = !tableId;
+    const tables = loadReferenceTables();
+    const existing = tableId ? tables[tableId] : null;
+
+    // Init working data
+    let editorName = existing ? existing.name : (prefill ? prefill.name : "");
+    let editorFields = existing ? [...existing.fields] : (prefill ? [...prefill.fields] : ["Key", "Value"]);
+    let editorData = existing ? existing.data.map(r => ({ ...r })) : (prefill ? prefill.data.map(r => ({ ...r })) : []);
+
+    // Overlay
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.7);z-index:100;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem;box-sizing:border-box;overflow-y:auto;";
+
+    const panel = document.createElement("div");
+    panel.style.cssText = "background:var(--bg-secondary);border-radius:0.6rem;padding:1.2rem;display:flex;flex-direction:column;gap:0.6rem;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,0.5);";
+
+    // Title
+    const title = document.createElement("div");
+    title.style.cssText = "font-weight:700;font-size:1rem;color:var(--text-primary);";
+    title.textContent = isNew ? "New Reference Table" : `Edit: ${existing.name}`;
+    panel.appendChild(title);
+
+    // Name input
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "panel-label";
+    nameLabel.textContent = "Table Name:";
+    panel.appendChild(nameLabel);
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "panel-input";
+    nameInput.value = editorName;
+    nameInput.placeholder = "e.g., Employee Counts by State";
+    nameInput.addEventListener("input", () => { editorName = nameInput.value.trim(); });
+    panel.appendChild(nameInput);
+
+    // Column headers editor
+    const colsLabel = document.createElement("div");
+    colsLabel.className = "panel-label";
+    colsLabel.style.marginTop = "0.25rem";
+    colsLabel.textContent = "COLUMNS";
+    panel.appendChild(colsLabel);
+
+    const colsRow = document.createElement("div");
+    colsRow.style.cssText = "display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;";
+
+    function rebuildColsRow() {
+      colsRow.innerHTML = "";
+      editorFields.forEach((f, idx) => {
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "panel-input";
+        inp.value = f;
+        inp.style.cssText = "width:8rem;padding:0.25rem 0.4rem;font-size:0.8rem;";
+        inp.addEventListener("change", () => {
+          const oldName = editorFields[idx];
+          const newName = inp.value.trim() || oldName;
+          editorFields[idx] = newName;
+          // Rename in data rows
+          editorData.forEach(row => {
+            if (oldName !== newName) {
+              row[newName] = row[oldName];
+              delete row[oldName];
+            }
+          });
+          rebuildDataTable();
+        });
+        const removeColBtn = document.createElement("button");
+        removeColBtn.className = "btn btn-ghost btn-xs btn-text-danger";
+        removeColBtn.textContent = "✕";
+        removeColBtn.title = "Remove column";
+        removeColBtn.style.padding = "0.1rem 0.3rem";
+        removeColBtn.addEventListener("click", () => {
+          if (editorFields.length <= 1) { alert("A table must have at least one column."); return; }
+          const removedName = editorFields[idx];
+          editorFields.splice(idx, 1);
+          editorData.forEach(row => delete row[removedName]);
+          rebuildColsRow();
+          rebuildDataTable();
+        });
+        const group = document.createElement("div");
+        group.style.cssText = "display:flex;align-items:center;gap:0.15rem;";
+        group.appendChild(inp);
+        group.appendChild(removeColBtn);
+        colsRow.appendChild(group);
+      });
+
+      const addColBtn = document.createElement("button");
+      addColBtn.className = "btn btn-ghost btn-xs";
+      addColBtn.textContent = "+ Col";
+      addColBtn.addEventListener("click", () => {
+        editorFields.push(`Column${editorFields.length + 1}`);
+        rebuildColsRow();
+        rebuildDataTable();
+      });
+      colsRow.appendChild(addColBtn);
+    }
+
+    rebuildColsRow();
+    panel.appendChild(colsRow);
+
+    // Data table
+    const dataLabel = document.createElement("div");
+    dataLabel.className = "panel-label";
+    dataLabel.style.marginTop = "0.25rem";
+    dataLabel.textContent = "DATA";
+    panel.appendChild(dataLabel);
+
+    const tableWrap = document.createElement("div");
+    tableWrap.style.cssText = "overflow:auto;flex:1;min-height:8rem;max-height:20rem;border:1px solid var(--border-color);border-radius:0.25rem;";
+
+    const dataTable = document.createElement("table");
+    dataTable.style.cssText = "border-collapse:collapse;font-size:0.8rem;width:100%;";
+
+    function rebuildDataTable() {
+      dataTable.innerHTML = "";
+
+      // Header
+      const thead = document.createElement("thead");
+      const htr = document.createElement("tr");
+      // Actions col header
+      const actTh = document.createElement("th");
+      actTh.style.cssText = "width:2rem;padding:0.25rem;";
+      htr.appendChild(actTh);
+      editorFields.forEach(f => {
+        const th = document.createElement("th");
+        th.textContent = f;
+        th.style.cssText = "padding:0.25rem 0.4rem;text-align:left;background:var(--bg-tertiary);color:var(--text-muted);white-space:nowrap;border-bottom:1px solid var(--border-color);";
+        htr.appendChild(th);
+      });
+      thead.appendChild(htr);
+      dataTable.appendChild(thead);
+
+      // Body
+      const tbody = document.createElement("tbody");
+      editorData.forEach((row, rowIdx) => {
+        const tr = document.createElement("tr");
+        // Delete row button
+        const delTd = document.createElement("td");
+        delTd.style.cssText = "padding:0.15rem;text-align:center;";
+        const delBtn = document.createElement("button");
+        delBtn.className = "btn btn-ghost btn-xs btn-text-danger";
+        delBtn.textContent = "✕";
+        delBtn.style.cssText = "padding:0.1rem 0.25rem;font-size:0.7rem;";
+        delBtn.addEventListener("click", () => {
+          editorData.splice(rowIdx, 1);
+          rebuildDataTable();
+        });
+        delTd.appendChild(delBtn);
+        tr.appendChild(delTd);
+
+        editorFields.forEach(f => {
+          const td = document.createElement("td");
+          const inp = document.createElement("input");
+          inp.type = "text";
+          inp.value = row[f] ?? "";
+          inp.style.cssText = "width:100%;padding:0.2rem 0.35rem;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:0.2rem;color:var(--text-primary);font-size:0.8rem;outline:none;box-sizing:border-box;";
+          inp.addEventListener("focus", () => { inp.style.borderColor = "#a78bfa"; inp.style.background = "var(--bg-tertiary)"; });
+          inp.addEventListener("blur", () => {
+            row[f] = inp.value;
+            inp.style.borderColor = "var(--border-color)";
+            inp.style.background = "var(--bg-primary)";
+          });
+          td.style.cssText = "padding:0.1rem;border-bottom:1px solid var(--border-color);";
+          td.appendChild(inp);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      dataTable.appendChild(tbody);
+    }
+
+    rebuildDataTable();
+    tableWrap.appendChild(dataTable);
+    panel.appendChild(tableWrap);
+
+    // Add row button
+    const addRowBtn = document.createElement("button");
+    addRowBtn.className = "btn btn-secondary btn-sm";
+    addRowBtn.textContent = "+ Add Row";
+    addRowBtn.style.alignSelf = "flex-start";
+    addRowBtn.addEventListener("click", () => {
+      const newRow = {};
+      editorFields.forEach(f => newRow[f] = "");
+      editorData.push(newRow);
+      rebuildDataTable();
+      // Scroll to bottom
+      setTimeout(() => { tableWrap.scrollTop = tableWrap.scrollHeight; }, 50);
+    });
+    panel.appendChild(addRowBtn);
+
+    // Error msg
+    const errorMsg = document.createElement("div");
+    errorMsg.style.cssText = "color:#ef4444;font-size:0.82rem;display:none;";
+    panel.appendChild(errorMsg);
+
+    // Action buttons
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:0.5rem;margin-top:0.25rem;";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "btn btn-sm";
+    saveBtn.textContent = isNew ? "Create Table" : "Save Changes";
+    saveBtn.addEventListener("click", () => {
+      // Flush any active inputs
+      dataTable.querySelectorAll("input").forEach(inp => inp.blur());
+
+      const finalName = nameInput.value.trim();
+      if (!finalName) {
+        errorMsg.textContent = "Please enter a table name.";
+        errorMsg.style.display = "block";
+        return;
+      }
+      if (editorFields.length === 0) {
+        errorMsg.textContent = "Table must have at least one column.";
+        errorMsg.style.display = "block";
+        return;
+      }
+
+      // Deduplicate key col values
+      const allTables = loadReferenceTables();
+      const id = tableId || `ref_${Date.now()}`;
+      allTables[id] = {
+        name: finalName,
+        fields: editorFields,
+        keyColumn: editorFields[0],
+        data: editorData,
+        lastUpdated: new Date().toLocaleDateString("en-CA"), // YYYY-MM-DD
+      };
+      saveReferenceTables(allTables);
+      overlay.remove();
+      renderDrawerPanel("reference");
+      // Recalculate any formula columns that use this reference table
+      if (parsedData && calcColumns.length > 0) {
+        applyCalcColumns();
+        renderTablePreview();
+      }
+    });
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "btn btn-secondary btn-sm";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => {
+      overlay.remove();
+      renderDrawerPanel("reference");
+    });
+
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(cancelBtn);
+    panel.appendChild(btnRow);
+
+    overlay.appendChild(panel);
+
+    // Mount on full workspace for a proper centered dialog
+    const workspace = document.getElementById("csvWorkspace");
+    if (workspace) {
+      workspace.appendChild(overlay);
+    }
+  }
+
+  // ── Formulas Panel ──────────────────────────────────────────────────
+  function buildCalcColumnsPanel(container) {
+    if (!parsedData) {
+      noDataMessage(container, "Load a CSV file to create formula columns.");
+      return;
+    }
+
     loadCalcColumns();
 
-    // Info section
-    const infoSection = panelSection("Calculations");
-    const infoText = document.createElement("div");
-    infoText.className = "panel-hint";
-    infoText.innerHTML = "Create new columns based on formulas. Use <code>{ColumnName}</code> syntax to reference existing columns. Supports: <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>(</code> <code>)</code>";
-    infoSection.appendChild(infoText);
-    container.appendChild(infoSection);
+    // ── Active formula columns list ──────────────────────────────────
+    const listSection = panelSection(`FORMULA COLUMNS (${calcColumns.length})`);
 
-    const divider1 = document.createElement("div");
-    divider1.className = "panel-divider";
-    container.appendChild(divider1);
-
-    // List of existing calculations
-    const listSection = panelSection(`ACTIVE COLUMNS (${calcColumns.length})`);
-    
     if (calcColumns.length === 0) {
       const empty = document.createElement("div");
       empty.className = "panel-hint";
-      empty.textContent = 'No calculated columns yet. Click "Add Calculated Column" below to create one.';
+      empty.textContent = 'No formula columns yet. Use "Add Formula Column" below.';
       listSection.appendChild(empty);
     } else {
       calcColumns.forEach(calc => {
         const item = document.createElement("div");
         item.className = "calc-column-item";
-        item.style.cssText = "padding: 0.5rem; background: var(--bg-tertiary); border-radius: 0.25rem; margin-bottom: 0.5rem;";
-        
-        const header = document.createElement("div");
-        header.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;";
-        
-        const name = document.createElement("strong");
-        name.textContent = calc.name;
-        name.style.color = "var(--text-primary)";
-        
+        item.style.cssText = "padding:0.5rem;background:var(--bg-tertiary);border-radius:0.3rem;margin-bottom:0.4rem;";
+
+        const hdr = document.createElement("div");
+        hdr.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:0.3rem;margin-bottom:0.2rem;";
+
+        const nameEl = document.createElement("strong");
+        nameEl.textContent = calc.name;
+        nameEl.style.color = "var(--text-primary)";
+        nameEl.style.flex = "1";
+        nameEl.style.minWidth = "0";
+        nameEl.style.overflow = "hidden";
+        nameEl.style.textOverflow = "ellipsis";
+        nameEl.style.whiteSpace = "nowrap";
+
+        // Type badge
+        const typeBadge = document.createElement("span");
+        const calcType = calc.type || "simple";
+        typeBadge.textContent = calcType === "lookup" ? "LOOKUP" : "SIMPLE";
+        typeBadge.style.cssText = `font-size:0.62rem;padding:0.1rem 0.35rem;border-radius:999px;font-weight:600;flex-shrink:0;
+          background:${calcType === "lookup" ? "rgba(167,139,250,0.15)" : "rgba(96,165,250,0.12)"};
+          color:${calcType === "lookup" ? "#a78bfa" : "#60a5fa"};
+          border:1px solid ${calcType === "lookup" ? "rgba(167,139,250,0.3)" : "rgba(96,165,250,0.2)"};`;
+
+        const btnGroup = document.createElement("div");
+        btnGroup.style.cssText = "display:flex;gap:0.25rem;flex-shrink:0;";
+
+        // Edit button — only for wizard-built (has config) or always show for usability
+        const editBtn = document.createElement("button");
+        editBtn.className = "btn btn-ghost btn-xs";
+        editBtn.textContent = calc.config ? "Edit" : "Edit";
+        editBtn.title = calc.config ? "Edit in wizard" : "Edit formula";
+        editBtn.addEventListener("click", () => showFormulaWizard(container, calc));
+
         const deleteBtn = document.createElement("button");
         deleteBtn.className = "btn btn-ghost btn-xs btn-text-danger";
         deleteBtn.textContent = "Delete";
         deleteBtn.addEventListener("click", () => {
-          if (confirm(`Delete calculated column "${calc.name}"?`)) {
+          if (confirm(`Delete formula column "${calc.name}"?`)) {
             deleteCalcColumn(calc.id);
-            renderDrawerPanel("calc");
+            renderDrawerPanel("formulas");
             applyCalcColumns();
             renderTablePreview();
             renderSummaryPanel();
           }
         });
-        
-        header.appendChild(name);
-        header.appendChild(deleteBtn);
-        
-        const formula = document.createElement("div");
-        formula.className = "info-text";
-        formula.style.fontFamily = "monospace";
-        formula.style.fontSize = "0.85rem";
-        formula.textContent = calc.formula;
-        
-        item.appendChild(header);
-        item.appendChild(formula);
+
+        btnGroup.appendChild(editBtn);
+        btnGroup.appendChild(deleteBtn);
+        hdr.appendChild(nameEl);
+        hdr.appendChild(typeBadge);
+        hdr.appendChild(btnGroup);
+
+        const formulaEl = document.createElement("div");
+        formulaEl.style.cssText = "font-family:monospace;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;";
+        formulaEl.textContent = calc.formula;
+
+        item.appendChild(hdr);
+        item.appendChild(formulaEl);
         listSection.appendChild(item);
       });
     }
-    
+
     container.appendChild(listSection);
 
-    // Clear All Calculations button
     if (calcColumns.length > 0) {
-      const clearAllBtn = document.createElement("button");
-      clearAllBtn.className = "btn btn-secondary btn-sm";
-      clearAllBtn.textContent = "Clear All Calculations";
-      clearAllBtn.style.width = "100%";
-      clearAllBtn.style.marginTop = "0.5rem";
-      clearAllBtn.addEventListener("click", () => {
-        if (confirm("Delete all calculated columns? This cannot be undone.")) {
-          // Store column names before clearing array
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "btn btn-secondary btn-sm";
+      clearBtn.textContent = "Clear All Formula Columns";
+      clearBtn.style.width = "100%";
+      clearBtn.style.marginTop = "0.4rem";
+      clearBtn.addEventListener("click", () => {
+        if (confirm("Delete all formula columns? This cannot be undone.")) {
           const columnNames = calcColumns.map(c => c.name);
-          
-          // Clear calcColumns array
           calcColumns = [];
           saveCalcColumns();
-          
-          // Remove columns from parsedData
           if (parsedData) {
             columnNames.forEach(colName => {
               const idx = parsedData.fields.indexOf(colName);
-              if (idx !== -1) {
-                parsedData.fields.splice(idx, 1);
-              }
+              if (idx !== -1) parsedData.fields.splice(idx, 1);
               parsedData.rows.forEach(row => delete row[colName]);
-              
-              // Remove from visible fields
               const visIdx = viewState.visibleFields.indexOf(colName);
-              if (visIdx !== -1) {
-                viewState.visibleFields.splice(visIdx, 1);
-              }
-              
-              // Remove from displayNames
+              if (visIdx !== -1) viewState.visibleFields.splice(visIdx, 1);
               delete viewState.displayNames[colName];
             });
           }
-          
-          // Refresh the UI
-          renderDrawerPanel("calc");
+          renderDrawerPanel("formulas");
           renderTablePreview();
           renderSummaryPanel();
         }
       });
-      container.appendChild(clearAllBtn);
+      container.appendChild(clearBtn);
     }
 
-    const divider2 = document.createElement("div");
-    divider2.className = "panel-divider";
-    container.appendChild(divider2);
+    const divider = document.createElement("div");
+    divider.className = "panel-divider";
+    container.appendChild(divider);
 
-    // Add new calculated column form
-    const addSection = panelSection("ADD NEW COLUMN");
-    
+    // ── Add formula column ────────────────────────────────────────────
+    const addSection = panelSection("ADD FORMULA COLUMN");
+
+    // Mode toggle
+    const modeWrap = document.createElement("div");
+    modeWrap.style.cssText = "display:flex;gap:0.3rem;margin-bottom:0.5rem;";
+
+    const modeSimpleBtn = document.createElement("button");
+    modeSimpleBtn.className = "btn btn-sm";
+    modeSimpleBtn.id = "fmodeSimple";
+    modeSimpleBtn.textContent = "Simple";
+    modeSimpleBtn.style.flex = "1";
+
+    const modeWizardBtn = document.createElement("button");
+    modeWizardBtn.className = "btn btn-secondary btn-sm";
+    modeWizardBtn.id = "fmodeWizard";
+    modeWizardBtn.textContent = "⚙ Wizard";
+    modeWizardBtn.style.flex = "1";
+
+    modeWrap.appendChild(modeSimpleBtn);
+    modeWrap.appendChild(modeWizardBtn);
+    addSection.appendChild(modeWrap);
+
+    // ── Simple mode form ─────────────────────────────────────────────
+    const simpleForm = document.createElement("div");
+    simpleForm.id = "formulaSimpleForm";
+
     const nameLabel = document.createElement("label");
     nameLabel.className = "panel-label";
     nameLabel.textContent = "Column Name:";
-    addSection.appendChild(nameLabel);
-    
+    simpleForm.appendChild(nameLabel);
+
     const nameInput = document.createElement("input");
     nameInput.type = "text";
     nameInput.className = "panel-input";
-    nameInput.id = "calcColName";
     nameInput.placeholder = "e.g., Click Rate %";
-    addSection.appendChild(nameInput);
-    
+    simpleForm.appendChild(nameInput);
+
     const formulaLabel = document.createElement("label");
     formulaLabel.className = "panel-label";
-    formulaLabel.style.marginTop = "0.5rem";
+    formulaLabel.style.marginTop = "0.4rem";
     formulaLabel.textContent = "Formula:";
-    addSection.appendChild(formulaLabel);
-    
+    simpleForm.appendChild(formulaLabel);
+
     const formulaInput = document.createElement("input");
     formulaInput.type = "text";
     formulaInput.className = "panel-input";
-    formulaInput.id = "calcColFormula";
-    formulaInput.placeholder = "e.g., {Clicked} / {Recipients} * 100";
+    formulaInput.placeholder = "{Clicked} / {Recipients} * 100";
     formulaInput.style.fontFamily = "monospace";
-    addSection.appendChild(formulaInput);
-    
-    const hint = document.createElement("div");
-    hint.className = "panel-hint";
-    hint.style.marginTop = "0.5rem";
-    hint.innerHTML = `<strong>Examples:</strong><br>
-    • {Clicked} / {Recipients} * 100<br>
-    • {Price} * {Quantity}<br>
-    • ({Revenue} - {Cost}) / {Revenue}`;
-    addSection.appendChild(hint);
-    
-    const errorMsg = document.createElement("div");
-    errorMsg.id = "calcColError";
-    errorMsg.style.cssText = "color: #ef4444; font-size: 0.85rem; margin-top: 0.5rem; display: none;";
-    addSection.appendChild(errorMsg);
-    
-    container.appendChild(addSection);
-    
-    const addBtn = applyButton("Add Calculated Column");
-    addBtn.addEventListener("click", () => {
+    simpleForm.appendChild(formulaInput);
+
+    // Reference table hint
+    const refTables = loadReferenceTables();
+    const refIds = Object.keys(refTables);
+
+    const syntaxHint = document.createElement("div");
+    syntaxHint.className = "panel-hint";
+    syntaxHint.style.marginTop = "0.4rem";
+    syntaxHint.innerHTML = `<strong>Simple:</strong> {Col1} / {Col2} * 100<br>
+      <strong>Lookup:</strong> {Clicked} / LOOKUP('id', MatchCol, ValueCol) * 100`;
+    simpleForm.appendChild(syntaxHint);
+
+    if (refIds.length > 0) {
+      const refHint = document.createElement("div");
+      refHint.className = "panel-hint";
+      refHint.style.cssText = "margin-top:0.35rem;background:rgba(167,139,250,0.07);border:1px solid rgba(167,139,250,0.2);border-radius:0.3rem;padding:0.35rem 0.45rem;font-size:0.75rem;";
+      const lines = refIds.map(id => {
+        const t = refTables[id];
+        return `<code>${id}</code> ${t.name}`;
+      }).join("<br>");
+      refHint.innerHTML = `<span style="color:#a78bfa;font-weight:600;">Tables:</span><br>${lines}`;
+      simpleForm.appendChild(refHint);
+    }
+
+    const simpleError = document.createElement("div");
+    simpleError.style.cssText = "color:#ef4444;font-size:0.82rem;margin-top:0.4rem;display:none;";
+    simpleForm.appendChild(simpleError);
+
+    const addSimpleBtn = applyButton("Add Formula Column");
+    addSimpleBtn.style.marginTop = "0.4rem";
+    addSimpleBtn.addEventListener("click", () => {
       const name = nameInput.value.trim();
       const formula = formulaInput.value.trim();
-      
-      errorMsg.style.display = "none";
-      
-      if (!name || !formula) {
-        errorMsg.textContent = "Please enter both name and formula.";
-        errorMsg.style.display = "block";
-        return;
-      }
-      
-      // Check if name already exists
+      simpleError.style.display = "none";
+      if (!name || !formula) { simpleError.textContent = "Enter both name and formula."; simpleError.style.display = "block"; return; }
       if (parsedData.fields.includes(name) || calcColumns.some(c => c.name === name)) {
-        errorMsg.textContent = `Column "${name}" already exists.`;
-        errorMsg.style.display = "block";
-        return;
+        simpleError.textContent = `Column "${name}" already exists.`; simpleError.style.display = "block"; return;
       }
-      
-      // Validate formula syntax
       const validation = validateFormula(formula);
-      if (!validation.valid) {
-        errorMsg.textContent = validation.error;
-        errorMsg.style.display = "block";
-        return;
-      }
-      
-      // Add calculated column
-      const id = `calc_${Date.now()}`;
-      calcColumns.push({ id, name, formula });
+      if (!validation.valid) { simpleError.textContent = validation.error; simpleError.style.display = "block"; return; }
+
+      const hasLookup = /LOOKUP\s*\(/i.test(formula);
+      calcColumns.push({ id: `calc_${Date.now()}`, name, formula, type: hasLookup ? "lookup" : "simple" });
       saveCalcColumns();
-      
-      // Clear inputs
       nameInput.value = "";
       formulaInput.value = "";
-      
-      // Rebuild panel and apply calculations
-      renderDrawerPanel("calc");
+      renderDrawerPanel("formulas");
       applyCalcColumns();
       renderTablePreview();
       renderSummaryPanel();
     });
-    container.appendChild(addBtn);
+    simpleForm.appendChild(addSimpleBtn);
+    addSection.appendChild(simpleForm);
+
+    // ── Wizard mode placeholder ──────────────────────────────────────
+    const wizardPlaceholder = document.createElement("div");
+    wizardPlaceholder.id = "formulaWizardPlaceholder";
+    wizardPlaceholder.style.display = "none";
+
+    const wizardLaunchBtn = document.createElement("button");
+    wizardLaunchBtn.className = "btn btn-sm";
+    wizardLaunchBtn.style.cssText = "width:100%;margin-top:0.25rem;";
+    wizardLaunchBtn.textContent = "Open Formula Wizard →";
+    wizardLaunchBtn.addEventListener("click", () => showFormulaWizard(container, null));
+    wizardPlaceholder.appendChild(wizardLaunchBtn);
+
+    // Templates
+    const tplLabel = document.createElement("div");
+    tplLabel.className = "panel-label";
+    tplLabel.style.marginTop = "0.75rem";
+    tplLabel.textContent = "QUICK TEMPLATES";
+    wizardPlaceholder.appendChild(tplLabel);
+
+    const templates = getFormulaTemplates();
+    templates.forEach(tpl => {
+      const tplBtn = document.createElement("button");
+      tplBtn.className = "btn btn-secondary btn-sm";
+      tplBtn.style.cssText = "width:100%;margin-top:0.3rem;text-align:left;padding:0.35rem 0.5rem;white-space:normal;";
+      tplBtn.innerHTML = `<span style="font-weight:600;display:block;">${tpl.label}</span><span style="font-size:0.72rem;opacity:0.7;display:block;white-space:normal;word-break:break-word;">${tpl.description}</span>`;
+      tplBtn.addEventListener("click", () => showFormulaWizard(container, null, tpl.config));
+      wizardPlaceholder.appendChild(tplBtn);
+    });
+
+    addSection.appendChild(wizardPlaceholder);
+    container.appendChild(addSection);
+
+    // Mode toggle logic
+    modeSimpleBtn.addEventListener("click", () => {
+      modeSimpleBtn.className = "btn btn-sm";
+      modeWizardBtn.className = "btn btn-secondary btn-sm";
+      simpleForm.style.display = "";
+      wizardPlaceholder.style.display = "none";
+    });
+    modeWizardBtn.addEventListener("click", () => {
+      modeWizardBtn.className = "btn btn-sm";
+      modeSimpleBtn.className = "btn btn-secondary btn-sm";
+      simpleForm.style.display = "none";
+      wizardPlaceholder.style.display = "";
+    });
+  }
+
+  // ── Formula templates (dynamic — adapt to loaded columns + ref tables) ───
+  function getFormulaTemplates() {
+    const cols = parsedData ? parsedData.fields.filter(f => f !== NOTE_COL) : [];
+    const refTables = loadReferenceTables();
+    const firstRef = Object.keys(refTables)[0] || null;
+    const firstRefTable = firstRef ? refTables[firstRef] : null;
+
+    // Guess likely numeric columns
+    const numericCols = cols.filter(f => {
+      if (!parsedData?.rows.length) return false;
+      const val = parsedData.rows[0][f];
+      return val !== undefined && val !== "" && !isNaN(Number(String(val).replace(/,/g, "")));
+    });
+
+    const col1 = numericCols[0] || cols[0] || "Column1";
+    const col2 = numericCols[1] || cols[1] || "Column2";
+    const strCol = cols.find(f => !numericCols.includes(f)) || cols[0] || "Category";
+
+    const templates = [
+      {
+        label: "Click Rate %",
+        description: "Numerator ÷ Denominator × 100",
+        config: { type: "lookup_rate", numeratorCol: col1, denominatorType: "column", denominatorCol: col2, multiplier: 100, name: "Click_Rate_Pct" }
+      },
+      {
+        label: "Per Capita Rate",
+        description: "Events per 100 people from reference table",
+        config: { type: "lookup_rate", numeratorCol: col1, denominatorType: firstRef ? "lookup" : "column", denominatorCol: col2,
+          lookupTable: firstRef, lookupMatchCol: strCol, lookupReturnCol: firstRefTable?.fields?.[1] || "Value",
+          multiplier: 100, name: "Per_Capita_Rate" }
+      },
+      {
+        label: "Ratio (A ÷ B)",
+        description: "Simple ratio between two columns",
+        config: { type: "lookup_rate", numeratorCol: col1, denominatorType: "column", denominatorCol: col2, multiplier: 1, name: "Ratio" }
+      },
+      {
+        label: "Difference (A − B)",
+        description: "Subtract one column from another",
+        config: { type: "difference", col1: col1, col2: col2, name: "Difference" }
+      },
+      {
+        label: "Weighted Score",
+        description: "Column × weight from reference table",
+        config: { type: "lookup_rate", numeratorCol: col1, denominatorType: firstRef ? "lookup" : "column", denominatorCol: col2,
+          lookupTable: firstRef, lookupMatchCol: strCol, lookupReturnCol: firstRefTable?.fields?.[1] || "Value",
+          multiplier: 1, name: "Weighted_Score" }
+      },
+    ];
+    return templates;
+  }
+
+  // ── Formula Wizard Overlay ───────────────────────────────────────────────
+  function showFormulaWizard(panelContainer, existingCalc, prefillConfig) {
+    const isEdit = !!existingCalc;
+    const initConfig = existingCalc?.config || prefillConfig || {};
+    const cols = parsedData ? parsedData.fields.filter(f => f !== NOTE_COL) : [];
+    const refTables = loadReferenceTables();
+    const refIds = Object.keys(refTables);
+
+    // ── Overlay shell ────────────────────────────────────────────────
+    const overlay = document.createElement("div");
+    // Full-workspace centered dialog
+    overlay.style.cssText = "position:absolute;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:1.5rem 1rem;box-sizing:border-box;overflow-y:auto;";
+
+    const panel = document.createElement("div");
+    panel.style.cssText = "background:var(--bg-secondary);border-radius:0.6rem;padding:1.2rem;display:flex;flex-direction:column;gap:0.65rem;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5);";
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-weight:700;font-size:0.95rem;color:var(--text-primary);";
+    title.textContent = isEdit ? `Edit: ${existingCalc.name}` : "Formula Wizard";
+    panel.appendChild(title);
+
+    // ── Formula type selector ───────────────────────────────────────
+    const typeLabel = document.createElement("div");
+    typeLabel.className = "panel-label";
+    typeLabel.textContent = "FORMULA TYPE";
+    panel.appendChild(typeLabel);
+
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "panel-input";
+    [
+      { value: "lookup_rate", label: "Rate / Percentage  (A ÷ B × multiplier)" },
+      { value: "difference",  label: "Difference  (A − B)" },
+      { value: "product",     label: "Product  (A × B)" },
+      { value: "sum",         label: "Sum  (A + B)" },
+    ].forEach(opt => {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      typeSelect.appendChild(o);
+    });
+    typeSelect.value = initConfig.type || "lookup_rate";
+    panel.appendChild(typeSelect);
+
+    // ── Dynamic step container ──────────────────────────────────────
+    const stepsWrap = document.createElement("div");
+    stepsWrap.style.cssText = "display:flex;flex-direction:column;gap:0.5rem;";
+    panel.appendChild(stepsWrap);
+
+    // ── Live formula preview ────────────────────────────────────────
+    const previewBox = document.createElement("div");
+    previewBox.style.cssText = "background:var(--bg-tertiary);border-radius:0.3rem;padding:0.4rem 0.6rem;font-family:monospace;font-size:0.8rem;color:#a78bfa;word-break:break-all;min-height:2rem;border:1px solid rgba(167,139,250,0.2);";
+    previewBox.textContent = "…";
+    panel.appendChild(previewBox);
+
+    // ── Column name ─────────────────────────────────────────────────
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "panel-label";
+    nameLabel.textContent = "COLUMN NAME";
+    panel.appendChild(nameLabel);
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "panel-input";
+    nameInput.value = existingCalc?.name || initConfig.name || "";
+    nameInput.placeholder = "e.g., Normalized_Click_Rate";
+    panel.appendChild(nameInput);
+
+    // ── Error msg ───────────────────────────────────────────────────
+    const errorMsg = document.createElement("div");
+    errorMsg.style.cssText = "color:#ef4444;font-size:0.82rem;display:none;";
+    panel.appendChild(errorMsg);
+
+    // ── Buttons ─────────────────────────────────────────────────────
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:0.5rem;";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "btn btn-sm";
+    saveBtn.style.flex = "1";
+    saveBtn.textContent = isEdit ? "Save Changes" : "Create Column";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "btn btn-secondary btn-sm";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => { overlay.remove(); renderDrawerPanel("formulas"); });
+
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(cancelBtn);
+    panel.appendChild(btnRow);
+
+    overlay.appendChild(panel);
+
+    // ── Helper: make a column dropdown ─────────────────────────────
+    function makeColSelect(labelText, selectedVal) {
+      const wrap = document.createElement("div");
+      const lbl = document.createElement("div");
+      lbl.style.cssText = "font-size:0.72rem;color:var(--text-muted);margin-bottom:0.15rem;";
+      lbl.textContent = labelText;
+      const sel = document.createElement("select");
+      sel.className = "panel-input";
+      sel.style.fontSize = "0.82rem";
+      cols.forEach(c => {
+        const o = document.createElement("option");
+        o.value = c; o.textContent = c;
+        if (c === selectedVal) o.selected = true;
+        sel.appendChild(o);
+      });
+      wrap.appendChild(lbl);
+      wrap.appendChild(sel);
+      return { wrap, sel };
+    }
+
+    function makeRefTableSelect(labelText, selectedTableId) {
+      const wrap = document.createElement("div");
+      const lbl = document.createElement("div");
+      lbl.style.cssText = "font-size:0.72rem;color:var(--text-muted);margin-bottom:0.15rem;";
+      lbl.textContent = labelText;
+      const sel = document.createElement("select");
+      sel.className = "panel-input";
+      sel.style.fontSize = "0.82rem";
+      if (refIds.length === 0) {
+        const o = document.createElement("option");
+        o.value = ""; o.textContent = "(No reference tables — create one first)";
+        sel.appendChild(o);
+      } else {
+        refIds.forEach(id => {
+          const o = document.createElement("option");
+          o.value = id; o.textContent = refTables[id].name;
+          if (id === selectedTableId) o.selected = true;
+          sel.appendChild(o);
+        });
+      }
+      wrap.appendChild(lbl);
+      wrap.appendChild(sel);
+      return { wrap, sel };
+    }
+
+    function makeRefColSelect(labelText, tableId, selectedCol) {
+      const wrap = document.createElement("div");
+      const lbl = document.createElement("div");
+      lbl.style.cssText = "font-size:0.72rem;color:var(--text-muted);margin-bottom:0.15rem;";
+      lbl.textContent = labelText;
+      const sel = document.createElement("select");
+      sel.className = "panel-input";
+      sel.style.fontSize = "0.82rem";
+      const tbl = tableId ? refTables[tableId] : null;
+      (tbl?.fields || []).forEach(f => {
+        const o = document.createElement("option");
+        o.value = f; o.textContent = f;
+        if (f === selectedCol) o.selected = true;
+        sel.appendChild(o);
+      });
+      wrap.appendChild(lbl);
+      wrap.appendChild(sel);
+      return { wrap, sel };
+    }
+
+    // ── Build formula preview string ────────────────────────────────
+    function buildFormula(cfg) {
+      const type = cfg.type || "lookup_rate";
+      if (type === "difference") {
+        return `{${cfg.col1 || "A"}} - {${cfg.col2 || "B"}}`;
+      }
+      if (type === "product") {
+        return `{${cfg.col1 || "A"}} * {${cfg.col2 || "B"}}`;
+      }
+      if (type === "sum") {
+        return `{${cfg.col1 || "A"}} + {${cfg.col2 || "B"}}`;
+      }
+      // lookup_rate: numerator / denominator * multiplier
+      const num = `{${cfg.numeratorCol || "Numerator"}}`;
+      let denom;
+      if (cfg.denominatorType === "lookup" && cfg.lookupTable) {
+        denom = `LOOKUP('${cfg.lookupTable}', ${cfg.lookupMatchCol || "MatchCol"}, ${cfg.lookupReturnCol || "ValueCol"})`;
+      } else {
+        denom = `{${cfg.denominatorCol || "Denominator"}}`;
+      }
+      const mult = cfg.multiplier && cfg.multiplier != 1 ? ` * ${cfg.multiplier}` : "";
+      return `${num} / ${denom}${mult}`;
+    }
+
+    // ── Render steps based on type ──────────────────────────────────
+    let currentConfig = { ...initConfig };
+
+    function updatePreview() {
+      previewBox.textContent = buildFormula(currentConfig) || "…";
+    }
+
+    function renderSteps() {
+      stepsWrap.innerHTML = "";
+      const type = typeSelect.value;
+      currentConfig.type = type;
+
+      if (type === "lookup_rate") {
+        // Step 1: Numerator column
+        const step1 = document.createElement("div");
+        step1.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(96,165,250,0.4);";
+        const s1title = document.createElement("div");
+        s1title.style.cssText = "font-size:0.75rem;font-weight:600;color:#60a5fa;margin-bottom:0.35rem;";
+        s1title.textContent = "Step 1 — Numerator";
+        step1.appendChild(s1title);
+        const { wrap: numWrap, sel: numSel } = makeColSelect("Column", currentConfig.numeratorCol);
+        numSel.addEventListener("change", () => { currentConfig.numeratorCol = numSel.value; updatePreview(); });
+        if (!currentConfig.numeratorCol && cols.length) { currentConfig.numeratorCol = numSel.value; }
+        step1.appendChild(numWrap);
+        stepsWrap.appendChild(step1);
+
+        // Step 2: Denominator
+        const step2 = document.createElement("div");
+        step2.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(167,139,250,0.4);";
+        const s2title = document.createElement("div");
+        s2title.style.cssText = "font-size:0.75rem;font-weight:600;color:#a78bfa;margin-bottom:0.35rem;";
+        s2title.textContent = "Step 2 — Denominator";
+        step2.appendChild(s2title);
+
+        // Denom type toggle
+        const denomTypeRow = document.createElement("div");
+        denomTypeRow.style.cssText = "display:flex;gap:0.3rem;margin-bottom:0.4rem;";
+        const denomColBtn = document.createElement("button");
+        denomColBtn.className = currentConfig.denominatorType !== "lookup" ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
+        denomColBtn.style.flex = "1";
+        denomColBtn.textContent = "Column";
+        const denomLookupBtn = document.createElement("button");
+        denomLookupBtn.className = currentConfig.denominatorType === "lookup" ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
+        denomLookupBtn.style.flex = "1";
+        denomLookupBtn.textContent = "Reference Table";
+        denomTypeRow.appendChild(denomColBtn);
+        denomTypeRow.appendChild(denomLookupBtn);
+        step2.appendChild(denomTypeRow);
+
+        const denomColWrap = document.createElement("div");
+        const denomLookupWrap = document.createElement("div");
+
+        // Column denom
+        const { wrap: dcWrap, sel: dcSel } = makeColSelect("Column", currentConfig.denominatorCol);
+        dcSel.addEventListener("change", () => { currentConfig.denominatorCol = dcSel.value; updatePreview(); });
+        if (!currentConfig.denominatorCol && cols.length) currentConfig.denominatorCol = dcSel.value;
+        denomColWrap.appendChild(dcWrap);
+
+        // Lookup denom
+        const { wrap: rtWrap, sel: rtSel } = makeRefTableSelect("Table", currentConfig.lookupTable);
+        denomLookupWrap.appendChild(rtWrap);
+
+        const lookupMatchRow = document.createElement("div");
+        lookupMatchRow.style.cssText = "display:flex;gap:0.3rem;margin-top:0.3rem;align-items:flex-end;";
+
+        const { wrap: lmWrap, sel: lmSel } = makeColSelect("CSV column to match", currentConfig.lookupMatchCol);
+        const eqLabel = document.createElement("div");
+        eqLabel.style.cssText = "padding-bottom:0.4rem;color:var(--text-muted);font-size:0.8rem;";
+        eqLabel.textContent = "=";
+
+        let rvSel;
+        const rvContainer = document.createElement("div");
+        rvContainer.style.flex = "1";
+
+        function rebuildReturnColSelect() {
+          rvContainer.innerHTML = "";
+          const tableId = rtSel.value;
+          const { wrap: rvWrap, sel: _rvSel } = makeRefColSelect("Table column to get", tableId, currentConfig.lookupReturnCol);
+          rvSel = _rvSel;
+          rvSel.addEventListener("change", () => { currentConfig.lookupReturnCol = rvSel.value; updatePreview(); });
+          if (!currentConfig.lookupReturnCol) currentConfig.lookupReturnCol = rvSel.value;
+          rvContainer.appendChild(rvWrap);
+        }
+
+        rtSel.addEventListener("change", () => {
+          currentConfig.lookupTable = rtSel.value;
+          rebuildReturnColSelect();
+          updatePreview();
+        });
+        lmSel.addEventListener("change", () => { currentConfig.lookupMatchCol = lmSel.value; updatePreview(); });
+        if (!currentConfig.lookupMatchCol && cols.length) currentConfig.lookupMatchCol = lmSel.value;
+        if (!currentConfig.lookupTable && refIds.length) currentConfig.lookupTable = rtSel.value;
+
+        rebuildReturnColSelect();
+
+        lookupMatchRow.appendChild(lmWrap);
+        lookupMatchRow.appendChild(eqLabel);
+        lookupMatchRow.appendChild(rvContainer);
+        denomLookupWrap.appendChild(lookupMatchRow);
+
+        // Show/hide denom sections
+        if (currentConfig.denominatorType !== "lookup") {
+          denomLookupWrap.style.display = "none";
+        } else {
+          denomColWrap.style.display = "none";
+        }
+
+        denomColBtn.addEventListener("click", () => {
+          currentConfig.denominatorType = "column";
+          denomColBtn.className = "btn btn-xs btn-sm";
+          denomLookupBtn.className = "btn btn-secondary btn-xs btn-sm";
+          denomColWrap.style.display = "";
+          denomLookupWrap.style.display = "none";
+          updatePreview();
+        });
+        denomLookupBtn.addEventListener("click", () => {
+          if (refIds.length === 0) { alert("Create a reference table first."); return; }
+          currentConfig.denominatorType = "lookup";
+          denomLookupBtn.className = "btn btn-xs btn-sm";
+          denomColBtn.className = "btn btn-secondary btn-xs btn-sm";
+          denomColWrap.style.display = "none";
+          denomLookupWrap.style.display = "";
+          updatePreview();
+        });
+
+        step2.appendChild(denomColWrap);
+        step2.appendChild(denomLookupWrap);
+        stepsWrap.appendChild(step2);
+
+        // Step 3: Multiplier
+        const step3 = document.createElement("div");
+        step3.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(52,211,153,0.4);";
+        const s3title = document.createElement("div");
+        s3title.style.cssText = "font-size:0.75rem;font-weight:600;color:#34d399;margin-bottom:0.35rem;";
+        s3title.textContent = "Step 3 — Format";
+        step3.appendChild(s3title);
+
+        const multRow = document.createElement("div");
+        multRow.style.cssText = "display:flex;gap:0.3rem;flex-wrap:wrap;";
+        [
+          { label: "Raw (÷ only)", value: 1 },
+          { label: "Percentage (× 100)", value: 100 },
+          { label: "Per 1,000 (× 1000)", value: 1000 },
+        ].forEach(opt => {
+          const btn = document.createElement("button");
+          btn.className = (currentConfig.multiplier ?? 100) == opt.value ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
+          btn.style.cssText = "flex:1;min-width:5rem;font-size:0.72rem;";
+          btn.textContent = opt.label;
+          btn.addEventListener("click", () => {
+            currentConfig.multiplier = opt.value;
+            multRow.querySelectorAll("button").forEach(b => b.className = "btn btn-secondary btn-xs btn-sm");
+            btn.className = "btn btn-xs btn-sm";
+            updatePreview();
+          });
+          multRow.appendChild(btn);
+        });
+        step3.appendChild(multRow);
+        stepsWrap.appendChild(step3);
+
+      } else {
+        // Difference / Product / Sum — just two column pickers
+        const stepA = document.createElement("div");
+        stepA.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(96,165,250,0.4);";
+        const sTitleA = document.createElement("div");
+        sTitleA.style.cssText = "font-size:0.75rem;font-weight:600;color:#60a5fa;margin-bottom:0.35rem;";
+        sTitleA.textContent = type === "difference" ? "Step 1 — Column A (minuend)" : "Step 1 — Column A";
+        stepA.appendChild(sTitleA);
+        const { wrap: aWrap, sel: aSel } = makeColSelect("Column", currentConfig.col1);
+        aSel.addEventListener("change", () => { currentConfig.col1 = aSel.value; updatePreview(); });
+        if (!currentConfig.col1) currentConfig.col1 = aSel.value;
+        stepA.appendChild(aWrap);
+        stepsWrap.appendChild(stepA);
+
+        const stepB = document.createElement("div");
+        stepB.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(167,139,250,0.4);";
+        const sTitleB = document.createElement("div");
+        sTitleB.style.cssText = "font-size:0.75rem;font-weight:600;color:#a78bfa;margin-bottom:0.35rem;";
+        sTitleB.textContent = type === "difference" ? "Step 2 — Column B (subtrahend)" : "Step 2 — Column B";
+        stepB.appendChild(sTitleB);
+        const { wrap: bWrap, sel: bSel } = makeColSelect("Column", currentConfig.col2);
+        bSel.addEventListener("change", () => { currentConfig.col2 = bSel.value; updatePreview(); });
+        if (!currentConfig.col2) currentConfig.col2 = bSel.value;
+        stepB.appendChild(bWrap);
+        stepsWrap.appendChild(stepB);
+      }
+
+      if (!currentConfig.multiplier) currentConfig.multiplier = 100;
+      updatePreview();
+    }
+
+    typeSelect.addEventListener("change", () => { currentConfig = { type: typeSelect.value }; renderSteps(); });
+    renderSteps();
+
+    // ── Save handler ────────────────────────────────────────────────
+    saveBtn.addEventListener("click", () => {
+      const name = nameInput.value.trim();
+      errorMsg.style.display = "none";
+      if (!name) { errorMsg.textContent = "Enter a column name."; errorMsg.style.display = "block"; return; }
+      if (!isEdit && (parsedData.fields.includes(name) || calcColumns.some(c => c.name === name))) {
+        errorMsg.textContent = `Column "${name}" already exists.`; errorMsg.style.display = "block"; return;
+      }
+
+      const formula = buildFormula(currentConfig);
+      const validation = validateFormula(formula);
+      if (!validation.valid) { errorMsg.textContent = validation.error; errorMsg.style.display = "block"; return; }
+
+      const isLookup = /LOOKUP\s*\(/i.test(formula);
+      const entry = {
+        id: existingCalc?.id || `calc_${Date.now()}`,
+        name,
+        formula,
+        type: isLookup ? "lookup" : "simple",
+        config: { ...currentConfig },
+      };
+
+      if (isEdit) {
+        // Remove old column from data if renamed
+        if (existingCalc.name !== name) {
+          deleteCalcColumn(existingCalc.id);
+          calcColumns.push(entry);
+        } else {
+          const idx = calcColumns.findIndex(c => c.id === existingCalc.id);
+          if (idx !== -1) calcColumns[idx] = entry;
+        }
+      } else {
+        calcColumns.push(entry);
+      }
+
+      saveCalcColumns();
+      overlay.remove();
+      renderDrawerPanel("formulas");
+      applyCalcColumns();
+      renderTablePreview();
+      renderSummaryPanel();
+    });
+
+    // Mount on full workspace so wizard can be a proper centered dialog
+    const workspace = document.getElementById("csvWorkspace");
+    if (workspace) {
+      workspace.appendChild(overlay);
+    }
   }
 
   // ── Summary Panel (Drawer) ───────────────────────────────────────────
@@ -3591,27 +4660,41 @@ function deleteCalcColumn(id) {
       return { valid: false, error: "Formula is empty" };
     }
 
+    // Strip LOOKUP(...) calls before other validation
+    const strippedLookups = formula.replace(/LOOKUP\s*\([^)]*\)/gi, "1");
+
     // Extract column references {ColumnName}
-    const colRefs = formula.match(/\{([^}]+)\}/g);
-    if (!colRefs) {
-      return { valid: false, error: "Formula must reference at least one column using {ColumnName} syntax" };
+    const colRefs = strippedLookups.match(/\{([^}]+)\}/g);
+    if (!colRefs && !/LOOKUP/i.test(formula)) {
+      return { valid: false, error: "Formula must reference at least one column using {ColumnName} syntax or a LOOKUP()" };
     }
 
     // Check if all referenced columns exist
-    const missingCols = [];
-    colRefs.forEach(ref => {
-      const colName = ref.slice(1, -1); // Remove { }
-      if (!parsedData.fields.includes(colName) && !calcColumns.some(c => c.name === colName)) {
-        missingCols.push(colName);
+    if (colRefs) {
+      const missingCols = [];
+      colRefs.forEach(ref => {
+        const colName = ref.slice(1, -1);
+        if (!parsedData.fields.includes(colName) && !calcColumns.some(c => c.name === colName)) {
+          missingCols.push(colName);
+        }
+      });
+      if (missingCols.length > 0) {
+        return { valid: false, error: `Column(s) not found: ${missingCols.join(", ")}` };
       }
-    });
-
-    if (missingCols.length > 0) {
-      return { valid: false, error: `Column(s) not found: ${missingCols.join(", ")}` };
     }
 
-    // Check for valid operators (basic validation)
-    const cleanedFormula = formula.replace(/\{[^}]+\}/g, "1");
+    // Validate LOOKUP references exist
+    const lookupRefs = [...formula.matchAll(/LOOKUP\s*\(\s*['"]([^'"]+)['"]\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi)];
+    for (const m of lookupRefs) {
+      const tableId = m[1].trim();
+      const tables = loadReferenceTables();
+      if (!tables[tableId]) {
+        return { valid: false, error: `Reference table not found: "${tableId}". Check the Reference Tables panel.` };
+      }
+    }
+
+    // Check for valid operators
+    const cleanedFormula = strippedLookups.replace(/\{[^}]+\}/g, "1");
     const invalidChars = cleanedFormula.match(/[^0-9+\-*/().\s]/g);
     if (invalidChars && invalidChars.length > 0) {
       return { valid: false, error: `Invalid characters in formula: ${[...new Set(invalidChars)].join(", ")}` };
@@ -3640,39 +4723,45 @@ function deleteCalcColumn(id) {
 
 function executeFormula(formula, row) {
     try {
-      // Replace {ColumnName} with actual values
       let expr = formula;
-      const colRefs = formula.match(/\{([^}]+)\}/g) || [];
-      
+
+      // ── Resolve LOOKUP(tableId, matchColumn, returnColumn) ──────────────
+      // Syntax: LOOKUP('ref_123', State, Employees)
+      //         LOOKUP('ref_123', {State}, Employees)  — {braces} optional for match col
+      expr = expr.replace(/LOOKUP\s*\(\s*['"]([^'"]+)['"]\s*,\s*\{?([^,}]+?)\}?\s*,\s*([^)]+?)\s*\)/gi,
+        (_, tableId, matchCol, returnCol) => {
+          matchCol = matchCol.trim();
+          returnCol = returnCol.trim();
+          const tables = loadReferenceTables();
+          const tbl = tables[tableId];
+          if (!tbl || !tbl.data) return "0";
+          const keyValue = String(row[matchCol] ?? "").trim();
+          const found = tbl.data.find(r => String(r[tbl.keyColumn] ?? "").trim() === keyValue);
+          if (!found) return "0";
+          const val = Number(String(found[returnCol] ?? "0").replace(/,/g, ""));
+          return isNaN(val) ? "0" : String(val);
+        }
+      );
+
+      // ── Resolve {ColumnName} references ──────────────────────────────────
+      const colRefs = expr.match(/\{([^}]+)\}/g) || [];
       colRefs.forEach(ref => {
         const colName = ref.slice(1, -1);
         let value = row[colName];
-        
-        // Convert to number, handle empty/null
         if (value === null || value === undefined || value === "") {
           value = 0;
         } else {
-          // Remove commas and convert to number
           value = Number(String(value).replace(/,/g, ""));
           if (isNaN(value)) value = 0;
         }
-        
-        // Replace ALL occurrences using regex
         const regex = new RegExp(ref.replace(/[{}]/g, '\\$&'), 'g');
         expr = expr.replace(regex, value);
       });
 
-      // Evaluate using safe parser instead of eval()
       const result = evaluateExpression(expr);
-      
-      // Handle division by zero and invalid results
-      if (!isFinite(result) || isNaN(result)) {
-        return "ERROR";
-      }
-      
-      // Round to 2 decimal places
+      if (!isFinite(result) || isNaN(result)) return "ERROR";
       return Math.round(result * 100) / 100;
-      
+
     } catch (e) {
       console.error('Formula error:', e, 'Formula:', formula);
       return "ERROR";
@@ -4069,6 +5158,25 @@ function executeFormula(formula, row) {
         },
       },
       "---",
+      (() => {
+        const isNoteKeyProtected = getProtectedColumns().has(field) && !manuallyProtectedColumns.has(field);
+        if (isNoteKeyProtected) {
+          return { label: "🔒 Protected (Note Key column)", disabled: true };
+        }
+        const isProtected = manuallyProtectedColumns.has(field);
+        return {
+          label: isProtected ? "🔓 Unprotect column" : "🔒 Protect column",
+          action: () => {
+            if (isProtected) {
+              manuallyProtectedColumns.delete(field);
+            } else {
+              manuallyProtectedColumns.add(field);
+            }
+            renderTablePreview();
+          },
+        };
+      })(),
+      "---",
       {
         label: "Hide column",
         action: () => {
@@ -4136,14 +5244,24 @@ function executeFormula(formula, row) {
     gutterTh.className = "row-gutter-th";
     hRow.appendChild(gutterTh);
 
+    const headerProtectedCols = getProtectedColumns();
+
     fields.forEach(field => {
       const th = document.createElement("th");
       const dn = viewState.displayNames[field] || field;
-      th.title = field;
+      const isHeaderProtected = headerProtectedCols.has(field);
+      th.title = isHeaderProtected ? `${field} (read-only)` : field;
 
       const label = document.createElement("span");
       label.textContent = dn;
       th.appendChild(label);
+
+      if (isHeaderProtected) {
+        const lockIcon = document.createElement("span");
+        lockIcon.textContent = " 🔒";
+        lockIcon.style.cssText = "font-size:0.7em;opacity:0.65;";
+        th.appendChild(lockIcon);
+      }
 
       if (sortState.field === field) {
         const ind = document.createElement("span");

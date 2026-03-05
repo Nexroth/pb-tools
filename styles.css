@@ -1154,6 +1154,7 @@ body {
   display: flex;
   overflow: hidden;
   min-height: 0;
+  position: relative;
 }
 
 /* ==== Operations icon rail ==== */
@@ -1168,6 +1169,8 @@ body {
   align-items: stretch;
   padding: 0.5rem 0.4rem;
   gap: 0.3rem;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .rail-btn {
@@ -1257,7 +1260,7 @@ body {
   display: flex;
   flex-direction: column;
 }
-.ops-drawer.open { width: 248px; }
+.ops-drawer.open { width: 290px; }
 
 .ops-drawer-header {
   padding: 0.5rem 0.7rem 0.45rem;
