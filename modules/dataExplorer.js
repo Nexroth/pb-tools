@@ -15,42 +15,60 @@
   // ── State ────────────────────────────────────────────────────────────────────
   let datasets    = [];   // [{ id, label, fields, rows }]
   let kpiCards    = [];   // [{ id, label, column, agg, format }]
-  let charts      = [];   // [{ id, type, xField, yField, datasetIds, title }]
+  let charts      = [];   // [{ id, type, xField, yField, datasetIds, title, x, y, w, h }]
   let activeFilters = {}; // { fieldName: value | "all" }
   let presentationMode = false;
+  let gridStack = null;   // GridStack instance for drag/resize layout
+  let globalDatasetFilter = null; // null = inactive, [id1, id2] = active with selected datasets
 
-  // Plotly dark theme — matches PB Tools palette
-  const PLOTLY_LAYOUT_BASE = {
-    paper_bgcolor: "rgba(15,23,42,0)",
-    plot_bgcolor:  "rgba(30,41,59,0.6)",
-    font: { color: "#f9fafb", family: "system-ui, -apple-system, sans-serif", size: 12 },
-    xaxis: {
-      gridcolor:  "rgba(148,163,184,0.1)",
-      linecolor:  "rgba(148,163,184,0.15)",
-      tickfont:   { color: "#d1d5db" },
-      titlefont:  { color: "#9ca3af" },
-      zerolinecolor: "rgba(148,163,184,0.15)",
-    },
-    yaxis: {
-      gridcolor:  "rgba(148,163,184,0.1)",
-      linecolor:  "rgba(148,163,184,0.15)",
-      tickfont:   { color: "#d1d5db" },
-      titlefont:  { color: "#9ca3af" },
-      zerolinecolor: "rgba(148,163,184,0.15)",
-    },
-    legend: {
-      bgcolor:     "rgba(15,23,42,0.5)",
-      bordercolor: "rgba(148,163,184,0.15)",
-      borderwidth: 1,
-      font: { color: "#d1d5db" },
-    },
-    margin: { t: 36, r: 16, b: 48, l: 52 },
-    hoverlabel: {
-      bgcolor:     "rgba(15,23,42,0.95)",
-      bordercolor: "rgba(148,163,184,0.3)",
-      font: { color: "#f9fafb" },
-    },
-  };
+  // Function to get computed CSS variable values
+  function getThemeColors() {
+    const style = getComputedStyle(document.getElementById('app'));
+    return {
+      textPrimary: style.getPropertyValue('--text-primary').trim(),
+      textSecondary: style.getPropertyValue('--text-secondary').trim(),
+      textMuted: style.getPropertyValue('--text-muted').trim(),
+      bgPrimary: style.getPropertyValue('--bg-primary').trim(),
+      bgSecondary: style.getPropertyValue('--bg-secondary').trim(),
+      border: style.getPropertyValue('--border').trim(),
+    };
+  }
+
+  // Plotly layout - dynamically built from theme colors
+  function getPlotlyLayoutBase() {
+    const colors = getThemeColors();
+    return {
+      paper_bgcolor: "transparent",
+      plot_bgcolor:  colors.bgSecondary + "99", // Add alpha for slight transparency
+      font: { color: colors.textPrimary, family: "system-ui, -apple-system, sans-serif", size: 12 },
+      xaxis: {
+        gridcolor:  colors.border,
+        linecolor:  colors.border,
+        tickfont:   { color: colors.textSecondary },
+        titlefont:  { color: colors.textMuted },
+        zerolinecolor: colors.border,
+      },
+      yaxis: {
+        gridcolor:  colors.border,
+        linecolor:  colors.border,
+        tickfont:   { color: colors.textSecondary },
+        titlefont:  { color: colors.textMuted },
+        zerolinecolor: colors.border,
+      },
+      legend: {
+        bgcolor:     colors.bgPrimary + "80", // Semi-transparent
+        bordercolor: colors.border,
+        borderwidth: 1,
+        font: { color: colors.textSecondary },
+      },
+      margin: { t: 36, r: 16, b: 72, l: 52 },
+      hoverlabel: {
+        bgcolor:     colors.bgPrimary + "F0", // Almost opaque
+        bordercolor: colors.border,
+        font: { color: colors.textPrimary },
+      },
+    };
+  }
 
   const PLOTLY_CONFIG = {
     displayModeBar:  true,
@@ -148,6 +166,7 @@
   function applyDashboard(dashboard) {
     kpiCards = (dashboard.kpiCards || []).map(k => ({ ...k }));
     charts   = (dashboard.charts   || []).map(c => ({ ...c }));
+    migrateKpiDataFormat(); // Convert old KPI format if loading old dashboard
   }
 
   // ── CSV parsing ──────────────────────────────────────────────────────────────
@@ -156,16 +175,35 @@
     return { fields: result.meta.fields || [], rows: result.data };
   }
 
+  function loadCSVFile(file) {
+    if (datasets.length >= MAX_DATASETS) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const { fields, rows } = parseCSV(ev.target.result);
+      if (!fields.length) return;
+      const label = file.name.replace(/\.csv$/i, "");
+      datasets.push({ id: uid(), label, fields, rows });
+      render();
+    };
+    reader.readAsText(file);
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
   // ── Render ───────────────────────────────────────────────────────────────────
   function render() {
     const container = document.getElementById(CONTAINER_ID);
     if (!container) return;
     container.className = "module-container module-container--dataExplorer";
 
+    // Destroy old GridStack instance before rebuilding DOM
+    // Otherwise it will point to a detached element after innerHTML replacement
+    if (gridStack) {
+      gridStack.destroy(false);
+      gridStack = null;
+    }
+
     container.innerHTML = `
       <div class="de-root" id="deRoot">
-
-        <!-- Toolbar -->
         <div class="de-toolbar" id="deToolbar">
           <div class="de-toolbar-left">
             <span class="de-toolbar-title">📊 Data Explorer</span>
@@ -176,37 +214,31 @@
             <button class="btn btn-secondary btn-sm" id="dePresentBtn">⛶ Present</button>
           </div>
         </div>
-
-        <!-- Body: sidebar + canvas -->
         <div class="de-body">
-
-          <!-- Left sidebar: datasets, KPIs, filters, charts config -->
           <div class="de-sidebar" id="deSidebar">
-
-            <!-- Datasets -->
             <div class="de-section">
               <div class="de-section-title">DATASETS</div>
               <div id="deDatasetList"></div>
               ${datasets.length < MAX_DATASETS ? `
-                <label class="btn btn-secondary btn-sm de-add-btn" style="cursor:pointer;margin-top:0.4rem;">
-                  + Add Dataset
-                  <input type="file" accept=".csv" id="deAddDatasetInput" style="display:none;">
-                </label>
+                <div id="deDropzone" class="de-dropzone">
+                  <div class="de-dropzone-text">Drop CSV here or</div>
+                  <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin-top:0.3rem;">
+                    Browse File
+                    <input type="file" accept=".csv" id="deAddDatasetInput" style="display:none;" multiple>
+                  </label>
+                </div>
+                <button class="btn btn-secondary btn-sm de-add-btn" id="deLoadFromWorkbenchBtn" style="margin-top:0.35rem;">
+                  ↓ Load from CSV Workbench
+                </button>
               ` : `<div class="de-hint">Max ${MAX_DATASETS} datasets loaded.</div>`}
             </div>
-
             <div class="de-divider"></div>
-
-            <!-- KPI Cards -->
             <div class="de-section">
               <div class="de-section-title">KPI CARDS</div>
               <div id="deKpiConfigList"></div>
               ${datasets.length > 0 ? `<button class="btn btn-secondary btn-sm de-add-btn" id="deAddKpiBtn">+ Add KPI Card</button>` : `<div class="de-hint">Load a dataset first.</div>`}
             </div>
-
             <div class="de-divider"></div>
-
-            <!-- Filters -->
             <div class="de-section">
               <div class="de-section-title">FILTERS</div>
               <div id="deFiltersList">
@@ -214,81 +246,113 @@
               </div>
               ${datasets.length > 0 ? `<button class="btn btn-secondary btn-sm de-add-btn" id="deAddFilterBtn">+ Add Filter</button>` : ""}
             </div>
-
             <div class="de-divider"></div>
-
-            <!-- Charts config -->
             <div class="de-section">
               <div class="de-section-title">CHARTS</div>
               <div id="deChartConfigList"></div>
               ${datasets.length > 0 ? `<button class="btn btn-secondary btn-sm de-add-btn" id="deAddChartBtn">+ Add Chart</button>` : `<div class="de-hint">Load a dataset first.</div>`}
             </div>
-
           </div>
-
-          <!-- Right canvas: KPI row + chart grid -->
           <div class="de-canvas" id="deCanvas">
-            <div id="deKpiRow" class="de-kpi-row"></div>
-            <div id="deChartGrid" class="de-chart-grid"></div>
+            ${datasets.length > 1 ? `<div id="deGlobalFilterBar" class="de-global-filter-bar"></div>` : ''}
+            <div id="deChartGrid" class="grid-stack"></div>
             ${datasets.length === 0 ? `
               <div class="de-empty">
                 <div class="de-empty-icon">📊</div>
                 <div class="de-empty-title">No datasets loaded</div>
                 <div class="de-empty-hint">Add a CSV file using the sidebar to get started.</div>
-              </div>
-            ` : ""}
+              </div>` : ""}
           </div>
-
         </div>
       </div>
     `;
 
     wireEvents();
+    renderGlobalFilterBar();
     renderDatasetList();
     renderKpiConfig();
     renderFilters();
     renderChartConfig();
-    renderKpiCards();
-    renderCharts();
+    renderGrid();
+    renderGrid();
   }
 
-  // ── Wire Events ──────────────────────────────────────────────────────────────
+  // ── Wire Events — attached fresh each render() since DOM is rebuilt ───────────
   function wireEvents() {
-    // Add dataset
-    const addInput = document.getElementById("deAddDatasetInput");
-    addInput?.addEventListener("change", e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        const { fields, rows } = parseCSV(ev.target.result);
-        if (!fields.length) return;
-        const label = file.name.replace(/\.csv$/i, "");
-        datasets.push({ id: uid(), label, fields, rows });
-        activeFilters = {}; // reset filters on new dataset
-        render();
-      };
-      reader.readAsText(file);
+    // File input browse
+    document.getElementById("deAddDatasetInput")?.addEventListener("change", e => {
+      Array.from(e.target.files || []).forEach(f => loadCSVFile(f));
       e.target.value = "";
     });
 
-    // KPI
+    // Drag and drop
+    const dropzone = document.getElementById("deDropzone");
+    if (dropzone) {
+      dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("de-dropzone--active"); });
+      dropzone.addEventListener("dragleave", e => { if (!dropzone.contains(e.relatedTarget)) dropzone.classList.remove("de-dropzone--active"); });
+      dropzone.addEventListener("drop", e => {
+        e.preventDefault();
+        dropzone.classList.remove("de-dropzone--active");
+        const files = Array.from(e.dataTransfer.files).filter(f => f.name.match(/\.csv$/i));
+        files.slice(0, MAX_DATASETS - datasets.length).forEach(f => loadCSVFile(f));
+      });
+    }
+
+    // Load from CSV Workbench
+    document.getElementById("deLoadFromWorkbenchBtn")?.addEventListener("click", () => {
+      const api = window.SecOpsWorkbench?.modules?.csvWorkbench?.api;
+      if (!api) { alert("CSV Workbench module not found."); return; }
+      const data = api.getData();
+      if (!data || !data.fields?.length) { alert("No data loaded in CSV Workbench."); return; }
+      if (datasets.length >= MAX_DATASETS) { alert(`Max ${MAX_DATASETS} datasets already loaded.`); return; }
+      const fields = data.visibleFields?.length ? data.visibleFields : data.fields;
+      const displayNames = data.displayNames || {};
+      const labeledFields = fields.map(f => displayNames[f] || f);
+      const rows = data.rows.map(row => {
+        const mapped = {};
+        fields.forEach((f, i) => { mapped[labeledFields[i]] = row[f]; });
+        return mapped;
+      });
+      const existing = datasets.filter(d => d.label.startsWith("Workbench data"));
+      const finalLabel = existing.length ? `Workbench data (${existing.length + 1})` : "Workbench data";
+      datasets.push({ id: uid(), label: finalLabel, fields: labeledFields, rows, fromWorkbench: true });
+      render();
+    });
+
+    // Add KPI
     document.getElementById("deAddKpiBtn")?.addEventListener("click", () => {
       const ds = datasets[0];
       if (!ds) return;
-      kpiCards.push({ id: uid(), label: "New KPI", column: ds.fields[0], agg: "count", format: "number" });
+      
+      // Find next available position at top of grid
+      const kpiIndex = kpiCards.length;
+      const x = (kpiIndex % 4) * 3;  // 4 KPIs per row (each 3 columns wide)
+      const y = 0;  // Always at top
+      
+      kpiCards.push({ 
+        id: uid(), 
+        label: "New KPI", 
+        column: ds.fields[0], 
+        agg: "count", 
+        format: "number",
+        datasetIds: null, // null = all datasets
+        x: x,
+        y: y,
+        w: 3,  // 3 columns wide (compact)
+        h: 2   // 2 rows tall
+      });
       renderKpiConfig();
-      renderKpiCards();
+      renderGrid(); // Render entire grid including KPIs
     });
 
-    // Filter
+    // Add filter
     document.getElementById("deAddFilterBtn")?.addEventListener("click", () => {
       const allFields = getAllFields();
       if (!allFields.length) return;
       showAddFilterDialog(allFields);
     });
 
-    // Chart
+    // Add chart
     document.getElementById("deAddChartBtn")?.addEventListener("click", () => {
       const ds = datasets[0];
       if (!ds) return;
@@ -300,23 +364,67 @@
         title:      "New Chart",
         xField:     catFields[0] || ds.fields[0],
         yField:     numFields[0] || ds.fields[0],
-        datasetIds: datasets.map(d => d.id),  // all datasets by default
+        datasetIds: null,  // null means "all datasets"
         agg:        "count",
-        size:       "medium",  // small | medium | large | full
+        size:       "medium",
       });
       renderChartConfig();
-      renderCharts();
+      renderGrid();
     });
 
-    // Save / Load dashboard
+    // Toolbar
     document.getElementById("deSaveDashboardBtn")?.addEventListener("click", () => showSaveDashboardDialog());
     document.getElementById("deLoadDashboardBtn")?.addEventListener("click", () => showLoadDashboardDialog());
-
-    // Presentation mode
     document.getElementById("dePresentBtn")?.addEventListener("click", () => enterPresentationMode());
+    
+    // Dataset selector clicks (event delegation for dynamically created selectors)
+    document.addEventListener("click", e => {
+      const selector = e.target.closest(".de-dataset-selector");
+      if (selector) {
+        e.stopPropagation();
+        
+        // Check if it's a chart selector
+        const chartId = selector.getAttribute("data-chart-id");
+        if (chartId) {
+          const chart = charts.find(c => c.id === chartId);
+          if (chart) {
+            showDatasetSelectorDropdown(selector, chart);
+          }
+        }
+        
+        // Check if it's a KPI selector
+        const kpiId = selector.getAttribute("data-kpi-id");
+        if (kpiId) {
+          const kpi = kpiCards.find(k => k.id === kpiId);
+          if (kpi) {
+            showKpiDatasetSelectorDropdown(selector, kpi);
+          }
+        }
+      }
+      // Close dropdown when clicking outside
+      else if (!e.target.closest(".de-dataset-dropdown")) {
+        document.querySelectorAll(".de-dataset-dropdown").forEach(dd => dd.remove());
+      }
+    });
   }
 
-  // ── Dataset List ─────────────────────────────────────────────────────────────
+  // ── Data Migration Helper ────────────────────────────────────────────────────
+  // Convert old KPI format (datasetId: string) to new format (datasetIds: array)
+  function migrateKpiDataFormat() {
+    kpiCards.forEach(kpi => {
+      // If old format exists, convert to new format
+      if (kpi.datasetId !== undefined && kpi.datasetIds === undefined) {
+        if (kpi.datasetId === null || kpi.datasetId === "all" || !kpi.datasetId) {
+          kpi.datasetIds = null; // All datasets
+        } else {
+          kpi.datasetIds = [kpi.datasetId]; // Single dataset as array
+        }
+        delete kpi.datasetId; // Remove old property
+      }
+    });
+  }
+
+    // ── Dataset List ─────────────────────────────────────────────────────────────
   function renderDatasetList() {
     const el = document.getElementById("deDatasetList");
     if (!el) return;
@@ -339,8 +447,8 @@
       labelInput.style.cssText = "flex:1;font-size:0.8rem;padding:0.2rem 0.4rem;";
       labelInput.addEventListener("change", () => {
         ds.label = labelInput.value.trim() || ds.label;
-        renderKpiCards();
-        renderCharts();
+        renderGrid();
+        renderGrid();
       });
 
       const meta = document.createElement("span");
@@ -390,12 +498,12 @@
       labelInput.className = "panel-input";
       labelInput.value = kpi.label;
       labelInput.style.cssText = "flex:1;font-size:0.8rem;padding:0.2rem 0.4rem;";
-      labelInput.addEventListener("change", () => { kpi.label = labelInput.value.trim() || kpi.label; renderKpiCards(); });
+      labelInput.addEventListener("change", () => { kpi.label = labelInput.value.trim() || kpi.label; renderGrid(); });
 
       const delBtn = document.createElement("button");
       delBtn.className = "btn btn-ghost btn-xs btn-text-danger";
       delBtn.textContent = "✕";
-      delBtn.addEventListener("click", () => { kpiCards = kpiCards.filter(k => k.id !== kpi.id); renderKpiConfig(); renderKpiCards(); });
+      delBtn.addEventListener("click", () => { kpiCards = kpiCards.filter(k => k.id !== kpi.id); renderKpiConfig(); renderGrid(); });
 
       hdr.appendChild(labelInput);
       hdr.appendChild(delBtn);
@@ -414,7 +522,7 @@
         if (f === kpi.column) o.selected = true;
         colSel.appendChild(o);
       });
-      colSel.addEventListener("change", () => { kpi.column = colSel.value; renderKpiCards(); });
+      colSel.addEventListener("change", () => { kpi.column = colSel.value; renderGrid(); });
 
       const aggSel = document.createElement("select");
       aggSel.className = "panel-input";
@@ -425,7 +533,7 @@
         if (a === kpi.agg) o.selected = true;
         aggSel.appendChild(o);
       });
-      aggSel.addEventListener("change", () => { kpi.agg = aggSel.value; renderKpiCards(); });
+      aggSel.addEventListener("change", () => { kpi.agg = aggSel.value; renderGrid(); });
 
       const fmtSel = document.createElement("select");
       fmtSel.className = "panel-input";
@@ -436,49 +544,18 @@
         if (f.v === kpi.format) o.selected = true;
         fmtSel.appendChild(o);
       });
-      fmtSel.addEventListener("change", () => { kpi.format = fmtSel.value; renderKpiCards(); });
+      fmtSel.addEventListener("change", () => { kpi.format = fmtSel.value; renderGrid(); });
 
       cfgRow.appendChild(colSel);
       cfgRow.appendChild(aggSel);
       cfgRow.appendChild(fmtSel);
       item.appendChild(cfgRow);
+
       el.appendChild(item);
     });
   }
 
   // ── KPI Cards (canvas) ───────────────────────────────────────────────────────
-  function renderKpiCards() {
-    const el = document.getElementById("deKpiRow");
-    if (!el) return;
-    el.innerHTML = "";
-    if (!kpiCards.length || !datasets.length) return;
-
-    // Combine all filtered rows from all datasets
-    const allRows = datasets.flatMap(ds => applyFilters(ds.rows));
-
-    kpiCards.forEach(kpi => {
-      const val   = computeAgg(allRows, kpi.column, kpi.agg);
-      const card  = document.createElement("div");
-      card.className = "de-kpi-card";
-
-      const valEl = document.createElement("div");
-      valEl.className = "de-kpi-value";
-      valEl.textContent = formatValue(val, kpi.format);
-
-      const lblEl = document.createElement("div");
-      lblEl.className = "de-kpi-label";
-      lblEl.textContent = kpi.label;
-
-      const subEl = document.createElement("div");
-      subEl.className = "de-kpi-sub";
-      subEl.textContent = `${kpi.agg.toUpperCase()}${kpi.agg !== "count" ? ` · ${kpi.column}` : ""} · ${allRows.length} rows`;
-
-      card.appendChild(valEl);
-      card.appendChild(lblEl);
-      card.appendChild(subEl);
-      el.appendChild(card);
-    });
-  }
 
   // ── Filters ──────────────────────────────────────────────────────────────────
   function getAllFields() {
@@ -522,8 +599,8 @@
       if (value === "all" || value === "") sel.value = "all";
       sel.addEventListener("change", () => {
         activeFilters[field] = sel.value;
-        renderKpiCards();
-        renderCharts();
+        renderGrid();
+        renderGrid();
       });
 
       const rmBtn = document.createElement("button");
@@ -532,8 +609,8 @@
       rmBtn.addEventListener("click", () => {
         delete activeFilters[field];
         renderFilters();
-        renderKpiCards();
-        renderCharts();
+        renderGrid();
+        renderGrid();
       });
 
       row.appendChild(lbl);
@@ -541,6 +618,214 @@
       row.appendChild(rmBtn);
       el.appendChild(row);
     });
+  }
+
+  function renderGlobalFilterBar() {
+    const el = document.getElementById("deGlobalFilterBar");
+    if (!el) return;
+    
+    const isActive = globalDatasetFilter !== null;
+    el.className = isActive ? "de-global-filter-bar" : "de-global-filter-bar inactive";
+    el.innerHTML = "";
+    
+    // Label
+    const label = document.createElement("div");
+    label.className = "de-global-filter-label";
+    label.innerHTML = isActive ? "🌐 GLOBAL FILTER:" : "🌐 Global Filter:";
+    el.appendChild(label);
+    
+    // Dataset selector button (shows current selection)
+    const selectorBtn = document.createElement("button");
+    selectorBtn.className = "btn btn-secondary btn-xs de-global-filter-selector";
+    selectorBtn.style.cssText = "flex:1;max-width:400px;text-align:left;justify-content:space-between;";
+    
+    let selectorText;
+    if (!isActive) {
+      selectorText = "All datasets";
+    } else {
+      const selectedCount = globalDatasetFilter.length;
+      const selectedDatasets = datasets.filter(ds => globalDatasetFilter.includes(ds.id));
+      selectorText = selectedCount === datasets.length
+        ? "All datasets"
+        : selectedCount === 0
+          ? "No datasets"
+          : selectedCount === 1
+            ? selectedDatasets[0].label
+            : `${selectedCount} datasets selected`;
+    }
+    
+    selectorBtn.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${selectorText}</span><span>▼</span>`;
+    
+    // Dropdown always enabled - clicking it shows selection menu
+    selectorBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showGlobalFilterDropdown(selectorBtn);
+    });
+    
+    el.appendChild(selectorBtn);
+    
+    // Action buttons
+    const actions = document.createElement("div");
+    actions.className = "de-global-filter-actions";
+    
+    if (isActive) {
+      // Clear button (deactivate global filter)
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "btn btn-secondary btn-xs";
+      clearBtn.textContent = "Clear";
+      clearBtn.addEventListener("click", () => {
+        globalDatasetFilter = null;
+        renderGlobalFilterBar();
+        renderGrid();
+        renderGrid();
+      });
+      actions.appendChild(clearBtn);
+    }
+    
+    el.appendChild(actions);
+  }
+  
+  function showGlobalFilterDropdown(buttonEl) {
+    
+    const isActive = globalDatasetFilter !== null;
+    
+    // Remove any existing dropdowns
+    document.querySelectorAll(".de-dataset-dropdown").forEach(dd => dd.remove());
+    
+    // Create dropdown
+    const dropdown = document.createElement("div");
+    dropdown.className = "de-dataset-dropdown";
+    
+    // Position dropdown below the button
+    const rect = buttonEl.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    
+    // Quick action buttons: All, None, Invert
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "de-dataset-dropdown-buttons";
+    
+    const createActionButton = (label, action) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.className = "btn btn-secondary btn-xs";
+      btn.style.flex = "1";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        action();
+      });
+      return btn;
+    };
+    
+    // All button
+    const allBtn = createActionButton("All", () => {
+      globalDatasetFilter = datasets.map(d => d.id);
+      renderGlobalFilterBar();
+      renderGrid();
+      renderGrid();
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    });
+    
+    // None button
+    const noneBtn = createActionButton("None", () => {
+      // If inactive, activate with empty selection
+      if (!isActive) {
+        globalDatasetFilter = [];
+      } else {
+        globalDatasetFilter = [];
+      }
+      renderGlobalFilterBar();
+      renderGrid();
+      renderGrid();
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    });
+    
+    // Invert button
+    const invertBtn = createActionButton("Invert", () => {
+      // If inactive, start with all datasets then invert
+      if (!isActive) {
+        globalDatasetFilter = datasets.map(d => d.id);
+      }
+      
+      const newSelection = [];
+      datasets.forEach(ds => {
+        if (!globalDatasetFilter.includes(ds.id)) {
+          newSelection.push(ds.id);
+        }
+      });
+      
+      globalDatasetFilter = newSelection;
+      renderGlobalFilterBar();
+      renderGrid();
+      renderGrid();
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = !cb.checked;
+      });
+    });
+    
+    buttonRow.appendChild(allBtn);
+    buttonRow.appendChild(noneBtn);
+    buttonRow.appendChild(invertBtn);
+    dropdown.appendChild(buttonRow);
+    
+    // Add checkboxes for each dataset
+    datasets.forEach(ds => {
+      // When inactive, show all as checked (starting point)
+      const isChecked = isActive ? globalDatasetFilter.includes(ds.id) : true;
+      
+      const row = document.createElement("div");
+      row.className = "de-dataset-dropdown-row";
+      
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = isChecked;
+      checkbox.style.cursor = "pointer";
+      checkbox.dataset.datasetId = ds.id;
+      
+      const label = document.createElement("span");
+      label.className = "de-dataset-dropdown-label";
+      label.textContent = ds.label;
+      
+      checkbox.addEventListener("change", e => {
+        e.stopPropagation();
+        
+        // If filter is inactive, activate it now with current selections
+        if (!isActive) {
+          // Initialize filter based on current checkbox states
+          globalDatasetFilter = [];
+          dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            if (cb.checked) {
+              globalDatasetFilter.push(cb.dataset.datasetId);
+            }
+          });
+        } else {
+          // Filter already active, just update selection
+          if (checkbox.checked) {
+            if (!globalDatasetFilter.includes(ds.id)) {
+              globalDatasetFilter.push(ds.id);
+            }
+          } else {
+            globalDatasetFilter = globalDatasetFilter.filter(id => id !== ds.id);
+          }
+        }
+        
+        renderGlobalFilterBar();
+        renderGrid();
+        renderGrid();
+      });
+      
+      label.addEventListener("click", e => {
+        e.stopPropagation();
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change'));
+      });
+      
+      row.appendChild(checkbox);
+      row.appendChild(label);
+      dropdown.appendChild(row);
+    });
+    
+    document.getElementById("app").appendChild(dropdown);
   }
 
   function showAddFilterDialog(fields) {
@@ -594,32 +879,56 @@
     }
     charts.forEach(chart => {
       const allFields = getAllFields();
+
+      // Track collapsed state per chart (default collapsed=false)
+      if (chart._collapsed === undefined) chart._collapsed = false;
+
       const item = document.createElement("div");
       item.style.cssText = "background:var(--bg-tertiary);border-radius:0.3rem;padding:0.45rem 0.5rem;margin-bottom:0.35rem;";
 
-      // Header
+      // Header — click to collapse/expand
       const hdr = document.createElement("div");
-      hdr.style.cssText = "display:flex;align-items:center;gap:0.3rem;margin-bottom:0.3rem;";
+      hdr.style.cssText = "display:flex;align-items:center;gap:0.3rem;cursor:pointer;";
+
+      const chevron = document.createElement("span");
+      chevron.style.cssText = "font-size:0.65rem;color:var(--text-muted);flex-shrink:0;transition:transform 0.15s;";
+      chevron.textContent = "▶";
+      chevron.style.transform = chart._collapsed ? "rotate(0deg)" : "rotate(90deg)";
 
       const titleInput = document.createElement("input");
       titleInput.type = "text";
       titleInput.className = "panel-input";
       titleInput.value = chart.title;
       titleInput.style.cssText = "flex:1;font-size:0.8rem;padding:0.2rem 0.4rem;";
-      titleInput.addEventListener("change", () => { chart.title = titleInput.value.trim() || chart.title; renderCharts(); });
+      titleInput.addEventListener("change", () => { chart.title = titleInput.value.trim() || chart.title; renderGrid(); });
+      titleInput.addEventListener("click", e => e.stopPropagation()); // don't collapse when editing title
 
       const delBtn = document.createElement("button");
       delBtn.className = "btn btn-ghost btn-xs btn-text-danger";
       delBtn.textContent = "✕";
-      delBtn.addEventListener("click", () => {
+      delBtn.addEventListener("click", e => {
+        e.stopPropagation();
         charts = charts.filter(c => c.id !== chart.id);
         renderChartConfig();
-        renderCharts();
+        renderGrid();
       });
 
+      hdr.appendChild(chevron);
       hdr.appendChild(titleInput);
       hdr.appendChild(delBtn);
       item.appendChild(hdr);
+
+      // Collapsible body
+      const body = document.createElement("div");
+      body.style.cssText = `margin-top:0.3rem;${chart._collapsed ? "display:none;" : ""}`;
+
+      hdr.addEventListener("click", () => {
+        chart._collapsed = !chart._collapsed;
+        body.style.display = chart._collapsed ? "none" : "";
+        chevron.style.transform = chart._collapsed ? "rotate(0deg)" : "rotate(90deg)";
+      });
+
+      // ── all config content goes into body, not item ──
 
       // Type selector — dropdown
       const typeRow = document.createElement("div");
@@ -649,11 +958,11 @@
       typeSel.addEventListener("change", () => {
         chart.type = typeSel.value;
         renderChartConfig();
-        renderCharts();
+        renderGrid();
       });
       typeRow.appendChild(typeLbl);
       typeRow.appendChild(typeSel);
-      item.appendChild(typeRow);
+      body.appendChild(typeRow);
 
       // Field selectors
       const fieldRow = document.createElement("div");
@@ -682,28 +991,28 @@
 
       const noY = ["histogram", "box", "violin"].includes(chart.type);
       if (chart.type === "pie") {
-        fieldRow.appendChild(makeFieldSel("Labels", chart.xField, v => { chart.xField = v; renderCharts(); }));
-        fieldRow.appendChild(makeFieldSel("Values", chart.yField, v => { chart.yField = v; renderCharts(); }));
+        fieldRow.appendChild(makeFieldSel("Labels", chart.xField, v => { chart.xField = v; renderGrid(); }));
+        fieldRow.appendChild(makeFieldSel("Values", chart.yField, v => { chart.yField = v; renderGrid(); }));
       } else if (chart.type === "heatmap") {
-        fieldRow.appendChild(makeFieldSel("X (category)", chart.xField, v => { chart.xField = v; renderCharts(); }));
-        fieldRow.appendChild(makeFieldSel("Y (category)", chart.yField, v => { chart.yField = v; renderCharts(); }));
+        fieldRow.appendChild(makeFieldSel("X (category)", chart.xField, v => { chart.xField = v; renderGrid(); }));
+        fieldRow.appendChild(makeFieldSel("Y (category)", chart.yField, v => { chart.yField = v; renderGrid(); }));
       } else if (noY) {
-        fieldRow.appendChild(makeFieldSel("Value column", chart.yField, v => { chart.yField = v; renderCharts(); }));
-        fieldRow.appendChild(makeFieldSel("Group by", chart.xField, v => { chart.xField = v; renderCharts(); }));
+        fieldRow.appendChild(makeFieldSel("Value column", chart.yField, v => { chart.yField = v; renderGrid(); }));
+        fieldRow.appendChild(makeFieldSel("Group by", chart.xField, v => { chart.xField = v; renderGrid(); }));
       } else {
-        fieldRow.appendChild(makeFieldSel("X axis", chart.xField, v => { chart.xField = v; renderCharts(); }));
+        fieldRow.appendChild(makeFieldSel("X axis", chart.xField, v => { chart.xField = v; renderGrid(); }));
         const yLabel = chart.type === "bubble" ? "Y axis" : "Y / Value";
-        fieldRow.appendChild(makeFieldSel(yLabel, chart.yField, v => { chart.yField = v; renderCharts(); }));
+        fieldRow.appendChild(makeFieldSel(yLabel, chart.yField, v => { chart.yField = v; renderGrid(); }));
       }
-      item.appendChild(fieldRow);
+      body.appendChild(fieldRow);
 
       // Bubble size field
       if (chart.type === "bubble") {
         const allFields2 = getAllFields();
         const bubbleRow = document.createElement("div");
         bubbleRow.style.cssText = "display:flex;gap:0.25rem;margin-top:0.3rem;";
-        bubbleRow.appendChild(makeFieldSel("Bubble size", chart.sizeField || allFields2[0], v => { chart.sizeField = v; renderCharts(); }));
-        item.appendChild(bubbleRow);
+        bubbleRow.appendChild(makeFieldSel("Bubble size", chart.sizeField || allFields2[0], v => { chart.sizeField = v; renderGrid(); }));
+        body.appendChild(bubbleRow);
       }
 
       // Aggregation for Y
@@ -722,10 +1031,10 @@
           if (a === (chart.agg || "count")) o.selected = true;
           aggSel.appendChild(o);
         });
-        aggSel.addEventListener("change", () => { chart.agg = aggSel.value; renderCharts(); });
+        aggSel.addEventListener("change", () => { chart.agg = aggSel.value; renderGrid(); });
         aggRow.appendChild(aggLbl);
         aggRow.appendChild(aggSel);
-        item.appendChild(aggRow);
+        body.appendChild(aggRow);
       }
 
       // Dataset checkboxes (only show if >1 dataset loaded)
@@ -733,70 +1042,75 @@
         const dsLbl = document.createElement("div");
         dsLbl.style.cssText = "font-size:0.68rem;color:var(--text-muted);margin-top:0.35rem;margin-bottom:0.15rem;";
         dsLbl.textContent = "Datasets:";
-        item.appendChild(dsLbl);
+        body.appendChild(dsLbl);
 
         datasets.forEach((ds, i) => {
           const cbRow = document.createElement("label");
           cbRow.style.cssText = "display:flex;align-items:center;gap:0.35rem;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;margin-bottom:0.1rem;";
           const cb = document.createElement("input");
           cb.type = "checkbox";
-          cb.checked = (chart.datasetIds || []).includes(ds.id);
+          // Handle null (all datasets) vs array
+          cb.checked = chart.datasetIds === null || chart.datasetIds === undefined || chart.datasetIds.includes(ds.id);
           cb.addEventListener("change", () => {
-            if (cb.checked) {
-              if (!chart.datasetIds.includes(ds.id)) chart.datasetIds.push(ds.id);
-            } else {
-              chart.datasetIds = chart.datasetIds.filter(id => id !== ds.id);
-            }
-            renderCharts();
+            // Use the same function as dropdown for consistency
+            updateChartDatasets(chart, cb.checked, ds.id);
+            // Update sidebar checkboxes with delay to avoid re-rendering during interaction
+            setTimeout(() => renderChartConfig(), 50);
           });
           const dot = document.createElement("span");
           dot.style.cssText = `width:7px;height:7px;border-radius:50%;background:${DATASET_COLORS[i % DATASET_COLORS.length]};flex-shrink:0;`;
           cbRow.appendChild(cb);
           cbRow.appendChild(dot);
           cbRow.appendChild(document.createTextNode(ds.label));
-          item.appendChild(cbRow);
+          body.appendChild(cbRow);
         });
       }
 
-      // Size control
-      const sizeRow = document.createElement("div");
-      sizeRow.style.cssText = "display:flex;gap:0.25rem;margin-top:0.35rem;";
-      const sizeLbl = document.createElement("span");
-      sizeLbl.style.cssText = "font-size:0.68rem;color:var(--text-muted);line-height:1.8;flex-shrink:0;";
-      sizeLbl.textContent = "Size:";
-      sizeRow.appendChild(sizeLbl);
-      ["small","medium","large","full"].forEach(sz => {
-        const btn = document.createElement("button");
-        btn.className = (chart.size || "medium") === sz ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
-        btn.style.flex = "1";
-        btn.style.fontSize = "0.68rem";
-        btn.textContent = sz.charAt(0).toUpperCase() + sz.slice(1);
-        btn.addEventListener("click", () => {
-          chart.size = sz;
-          sizeRow.querySelectorAll("button").forEach(b => b.className = "btn btn-secondary btn-xs btn-sm");
-          btn.className = "btn btn-xs btn-sm";
-          renderCharts();
-        });
-        sizeRow.appendChild(btn);
-      });
-      item.appendChild(sizeRow);
-
+      item.appendChild(body);
       el.appendChild(item);
     });
   }
 
   // ── Charts ───────────────────────────────────────────────────────────────────
   function buildChartData(chart) {
-    const usedDatasets = datasets.filter(ds =>
-      !chart.datasetIds?.length || chart.datasetIds.includes(ds.id)
-    );
-    if (!usedDatasets.length) return null;
+    // Determine which datasets to use
+    // Priority: Global filter > Chart-specific selection > All datasets
+    
+    let usedDatasets;
+    
+    // Global filter takes precedence
+    if (globalDatasetFilter !== null) {
+      usedDatasets = datasets.filter(ds => {
+        const included = globalDatasetFilter.includes(ds.id);
+        return included;
+      });
+    } else {
+      // Use chart-specific selection
+      // null/undefined = all datasets (default)
+      // [] = no datasets (explicitly cleared)
+      // [id1, id2] = specific datasets
+      usedDatasets = chart.datasetIds === null || chart.datasetIds === undefined
+        ? datasets
+        : datasets.filter(ds => {
+            const included = chart.datasetIds.includes(ds.id);
+            return included;
+          });
+    }
+    
+    
+    if (!usedDatasets.length) {
+      console.warn("[Data Explorer] No datasets to render for chart", chart.id);
+      return null;
+    }
 
     const traces = [];
+    const colors = getThemeColors(); // Get theme colors for chart text/labels
 
     usedDatasets.forEach((ds, dsIdx) => {
       const filteredRows = applyFilters(ds.rows);
-      const color = DATASET_COLORS[dsIdx % DATASET_COLORS.length];
+      // Use original dataset index for consistent colors, not filtered array index
+      const originalIdx = datasets.findIndex(d => d.id === ds.id);
+      const color = DATASET_COLORS[originalIdx % DATASET_COLORS.length];
 
       // ── Types that don't need group-by aggregation ────────────────────────
 
@@ -831,13 +1145,17 @@
           const v = toNumber(row[chart.yField]);
           if (!isNaN(v)) grpMap[key].push(v);
         });
-        Object.entries(grpMap).forEach(([grp, vals], gi) => {
+        const grpEntries = Object.entries(grpMap);
+        grpEntries.forEach(([grp, vals], gi) => {
           traces.push({
-            type:    "box",
-            name:    grp,
-            y:       vals,
-            marker:  { color: DATASET_COLORS[gi % DATASET_COLORS.length] },
-            boxmean: true,
+            type:        "box",
+            name:        ds.label,          // dataset label for legend
+            x:           Array(vals.length).fill(grp),  // group on X axis
+            y:           vals,
+            marker:      { color },
+            boxmean:     true,
+            legendgroup: ds.id,
+            showlegend:  gi === 0,          // show once per dataset only
             hovertemplate: "%{y}<extra>" + grp + "</extra>",
           });
         });
@@ -852,14 +1170,18 @@
           const v = toNumber(row[chart.yField]);
           if (!isNaN(v)) grpMap[key].push(v);
         });
-        Object.entries(grpMap).forEach(([grp, vals], gi) => {
+        const vEntries = Object.entries(grpMap);
+        vEntries.forEach(([grp, vals], gi) => {
           traces.push({
-            type:     "violin",
-            name:     grp,
-            y:        vals,
-            marker:   { color: DATASET_COLORS[gi % DATASET_COLORS.length] },
-            box:      { visible: true },
-            meanline: { visible: true },
+            type:        "violin",
+            name:        ds.label,          // dataset label for legend
+            x:           Array(vals.length).fill(grp),  // group on X axis
+            y:           vals,
+            marker:      { color },
+            box:         { visible: true },
+            meanline:    { visible: true },
+            legendgroup: ds.id,
+            showlegend:  gi === 0,          // show once per dataset only
             hovertemplate: "%{y}<extra>" + grp + "</extra>",
           });
         });
@@ -927,16 +1249,57 @@
       });
 
       if (chart.type === "pie") {
+        // For pie charts, combine all datasets by summing matching labels
+        // This prevents overlapping pie traces and creates one unified pie
+        const combinedData = {};
+        
+        usedDatasets.forEach((ds, dsIdx) => {
+          const filteredRows = applyFilters(ds.rows);
+          const aggGroups = {};
+          filteredRows.forEach(row => {
+            const key = String(row[chart.xField] ?? "(blank)");
+            if (!aggGroups[key]) aggGroups[key] = [];
+            aggGroups[key].push(toNumber(row[chart.yField]));
+          });
+          
+          Object.keys(aggGroups).forEach(key => {
+            const nums = aggGroups[key].filter(n => !isNaN(n));
+            const agg  = chart.agg || "count";
+            let value = 0;
+            if (agg === "count") value = aggGroups[key].length;
+            else if (nums.length) {
+              if (agg === "sum")   value = nums.reduce((a, b) => a + b, 0);
+              if (agg === "avg")   value = nums.reduce((a, b) => a + b, 0) / nums.length;
+              if (agg === "max")   value = Math.max(...nums);
+              if (agg === "min")   value = Math.min(...nums);
+            }
+            
+            // Sum values across datasets for matching labels
+            if (!combinedData[key]) combinedData[key] = 0;
+            combinedData[key] += value;
+          });
+        });
+        
+        const xVals = Object.keys(combinedData);
+        const yVals = xVals.map(k => combinedData[k]);
+        
         traces.push({
           type:   "pie",
-          name:   ds.label,
           labels: xVals,
           values: yVals,
           marker: { colors: xVals.map((_, i) => `hsl(${(i * 47) % 360}, 70%, 55%)`) },
-          textfont: { color: "#f9fafb" },
+          textfont: { color: colors.textPrimary },
+          textposition: "inside",
           hovertemplate: "%{label}: %{value} (%{percent})<extra></extra>",
         });
-      } else if (chart.type === "bar") {
+        
+        // Skip the normal aggregation loop for pie charts
+        return traces;
+      }
+      
+      // ── Group-by aggregation (bar, line) ───────────────────────────────────
+      
+      if (chart.type === "bar") {
         traces.push({
           type:   "bar",
           name:   ds.label,
@@ -962,56 +1325,787 @@
     return traces;
   }
 
-  function renderCharts() {
-    const grid = document.getElementById("deChartGrid");
-    if (!grid) return;
-    grid.innerHTML = "";
-    if (!charts.length || !datasets.length) return;
+  function buildLayout(chart) {
+    const isPie   = chart.type === "pie";
+    const isHist  = chart.type === "histogram";
+    const isNoAgg = ["scatter","bubble","histogram","box","violin"].includes(chart.type);
+    const yAxisLabel = isPie ? "" : isHist ? "Count" : isNoAgg ? (chart.yField || "") :
+      (chart.agg && chart.agg !== "count" ? `${chart.agg.toUpperCase()}(${chart.yField || ""})` : "COUNT");
+    const xAxisLabel = isPie ? "" : isHist ? (chart.yField || "") : (chart.xField || "");
+    
+    // Dataset indicator moved to dedicated selector element
+    const usedDatasets = chart.datasetIds === null || chart.datasetIds === undefined
+      ? datasets
+      : datasets.filter(ds => chart.datasetIds.includes(ds.id));
+    
+    const colors = getThemeColors();
+    const layoutBase = getPlotlyLayoutBase();
+    
+    return {
+      ...layoutBase,
+      title: { text: "", font: { color: colors.textMuted, size: 11 } },  // Empty title
+      showlegend: isPie || usedDatasets.length > 1,  // Enable legend for pie charts AND multi-dataset charts
+      legend: isPie ? {
+        ...layoutBase.legend,
+        orientation: 'v',
+        x: 1.02,
+        xanchor: 'left',
+        y: 0.5,
+        yanchor: 'middle'
+      } : layoutBase.legend,
+      xaxis: { ...layoutBase.xaxis, title: { text: xAxisLabel, font: { color: colors.textMuted, size: 11 } } },
+      yaxis: { ...layoutBase.yaxis, title: { text: yAxisLabel, font: { color: colors.textMuted, size: 11 } } },
+      dragmode: false,  // Disable Plotly drag to allow GridStack drag to work
+    };
+  }
 
-    charts.forEach(chart => {
-      const traces = buildChartData(chart);
-      if (!traces?.length) return;
-
-      const wrap = document.createElement("div");
-      const sizeClass = { small: "de-chart-wrap--sm", medium: "", large: "de-chart-wrap--lg", full: "de-chart-wrap--full" }[chart.size || "medium"] || "";
-      wrap.className = `de-chart-wrap${sizeClass ? " " + sizeClass : ""}`;
-
-      const titleEl = document.createElement("div");
-      titleEl.className = "de-chart-title";
-      titleEl.textContent = chart.title;
-      wrap.appendChild(titleEl);
-
-      const chartHeight = { small: 200, medium: 280, large: 380, full: 400 }[chart.size || "medium"] || 280;
-      const plotDiv = document.createElement("div");
-      plotDiv.style.cssText = `width:100%;height:${chartHeight}px;`;
-      wrap.appendChild(plotDiv);
-      grid.appendChild(wrap);
-
-      // Clean axis labels
-      const isPie  = chart.type === "pie";
-      const isHist = chart.type === "histogram";
-      const isNoAgg = ["scatter","bubble","histogram","box","violin"].includes(chart.type);
-      const yAxisLabel = isPie ? "" : isHist ? "Count" : isNoAgg ? (chart.yField || "") :
-        (chart.agg && chart.agg !== "count" ? `${chart.agg.toUpperCase()}(${chart.yField || ""})` : "COUNT");
-      const xAxisLabel = isPie ? "" : isHist ? (chart.yField || "") : (chart.xField || "");
-
-      const layout = {
-        ...PLOTLY_LAYOUT_BASE,
-        title: { text: "", font: { color: "#9ca3af", size: 11 } },
-        showlegend: (chart.datasetIds?.length || 1) > 1 || datasets.length > 1,
-        xaxis: { ...PLOTLY_LAYOUT_BASE.xaxis, title: { text: xAxisLabel, font: { color: "#6b7280", size: 11 } } },
-        yaxis: { ...PLOTLY_LAYOUT_BASE.yaxis, title: { text: yAxisLabel, font: { color: "#6b7280", size: 11 } } },
-      };
-
-      // Plotly.newPlot is async-ish — use setTimeout to ensure DOM is ready
-      setTimeout(() => {
-        if (typeof Plotly !== "undefined") {
-          Plotly.newPlot(plotDiv, traces, layout, PLOTLY_CONFIG);
-        } else {
-          plotDiv.innerHTML = `<div style="color:#ef4444;padding:1rem;font-size:0.85rem;">Plotly not loaded. Check lib/plotly-basic.min.js.</div>`;
-        }
-      }, 0);
+  function showKpiDatasetSelectorDropdown(buttonEl, kpi) {
+    
+    // Remove any existing dropdowns
+    document.querySelectorAll(".de-dataset-dropdown").forEach(dd => dd.remove());
+    
+    // Create dropdown
+    const dropdown = document.createElement("div");
+    dropdown.className = "de-dataset-dropdown";
+    
+    // Position dropdown below the button
+    const rect = buttonEl.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    
+    // Quick action buttons: All, None, Invert
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "de-dataset-dropdown-buttons";
+    
+    const createActionButton = (label, action) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.className = "btn btn-secondary btn-xs";
+      btn.style.flex = "1";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        action();
+      });
+      return btn;
+    };
+    
+    // All button
+    const allBtn = createActionButton("All", () => {
+      kpi.datasetIds = null;
+      renderSingleKpi(kpi);
+      updateKpiDatasetSelectorText(kpi);
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
     });
+    
+    // None button
+    const noneBtn = createActionButton("None", () => {
+      kpi.datasetIds = [];
+      renderSingleKpi(kpi);
+      updateKpiDatasetSelectorText(kpi);
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    });
+    
+    // Invert button
+    const invertBtn = createActionButton("Invert", () => {
+      if (kpi.datasetIds === null || kpi.datasetIds === undefined) {
+        kpi.datasetIds = datasets.map(d => d.id);
+      }
+      
+      const newSelection = [];
+      datasets.forEach(ds => {
+        if (!kpi.datasetIds.includes(ds.id)) {
+          newSelection.push(ds.id);
+        }
+      });
+      
+      kpi.datasetIds = newSelection;
+      if (kpi.datasetIds.length === datasets.length) {
+        kpi.datasetIds = null;
+      }
+      
+      renderSingleKpi(kpi);
+      updateKpiDatasetSelectorText(kpi);
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = !cb.checked;
+      });
+    });
+    
+    buttonRow.appendChild(allBtn);
+    buttonRow.appendChild(noneBtn);
+    buttonRow.appendChild(invertBtn);
+    dropdown.appendChild(buttonRow);
+    
+    // Add checkboxes for each dataset
+    datasets.forEach(ds => {
+      const isChecked = kpi.datasetIds === null || kpi.datasetIds === undefined || kpi.datasetIds.includes(ds.id);
+      
+      const row = document.createElement("div");
+      row.className = "de-dataset-dropdown-row";
+      
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = isChecked;
+      checkbox.style.cursor = "pointer";
+      checkbox.dataset.datasetId = ds.id;
+      
+      const label = document.createElement("span");
+      label.className = "de-dataset-dropdown-label";
+      label.textContent = ds.label;
+      
+      checkbox.addEventListener("change", e => {
+        e.stopPropagation();
+        updateKpiDatasets(kpi, checkbox.checked, ds.id);
+      });
+      
+      label.addEventListener("click", e => {
+        e.stopPropagation();
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change'));
+      });
+      
+      row.appendChild(checkbox);
+      row.appendChild(label);
+      dropdown.appendChild(row);
+    });
+    
+    document.getElementById("app").appendChild(dropdown);
+  }
+  
+  function updateKpiDatasets(kpi, isChecked, datasetId) {
+    
+    // Initialize if null/undefined
+    if (kpi.datasetIds === null || kpi.datasetIds === undefined) {
+      kpi.datasetIds = datasets.map(d => d.id);
+    }
+    
+    if (isChecked) {
+      if (!kpi.datasetIds.includes(datasetId)) {
+        kpi.datasetIds.push(datasetId);
+      }
+    } else {
+      kpi.datasetIds = kpi.datasetIds.filter(id => id !== datasetId);
+    }
+    
+    // If all selected, set to null
+    if (kpi.datasetIds.length === datasets.length) {
+      kpi.datasetIds = null;
+    }
+    
+    
+    renderSingleKpi(kpi);
+    updateKpiDatasetSelectorText(kpi);
+  }
+
+  function showDatasetSelectorDropdown(selectorEl, chart) {
+    // Remove any existing dropdowns
+    document.querySelectorAll(".de-dataset-dropdown").forEach(dd => dd.remove());
+    
+    // Create dropdown
+    const dropdown = document.createElement("div");
+    dropdown.className = "de-dataset-dropdown";
+    
+    // Position dropdown below the selector (only positioning styles inline)
+    const rect = selectorEl.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    
+    // Quick action buttons: All, None, Invert
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "de-dataset-dropdown-buttons";
+    
+    const createActionButton = (label, action) => {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.className = "btn btn-secondary btn-xs";
+      btn.style.flex = "1";
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        action();
+      });
+      return btn;
+    };
+    
+    // All button - select all datasets
+    const allBtn = createActionButton("All", () => {
+      chart.datasetIds = null; // null means "all datasets"
+      renderSingleChart(chart);
+      updateDatasetSelectorText(chart);
+      setTimeout(() => renderChartConfig(), 50);
+      // Update checkboxes in dropdown
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    });
+    
+    // None button - deselect all datasets
+    const noneBtn = createActionButton("None", () => {
+      chart.datasetIds = []; // empty array means "no datasets"
+      renderSingleChart(chart);
+      updateDatasetSelectorText(chart);
+      setTimeout(() => renderChartConfig(), 50);
+      // Update checkboxes in dropdown
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    });
+    
+    // Invert button - flip selection
+    const invertBtn = createActionButton("Invert", () => {
+      // Initialize if null
+      if (chart.datasetIds === null || chart.datasetIds === undefined) {
+        chart.datasetIds = datasets.map(d => d.id);
+      }
+      
+      // Flip each dataset
+      const newSelection = [];
+      datasets.forEach(ds => {
+        if (!chart.datasetIds.includes(ds.id)) {
+          newSelection.push(ds.id);
+        }
+      });
+      
+      chart.datasetIds = newSelection;
+      
+      // If all selected after invert, set to null
+      if (chart.datasetIds.length === datasets.length) {
+        chart.datasetIds = null;
+      }
+      
+      renderSingleChart(chart);
+      updateDatasetSelectorText(chart);
+      setTimeout(() => renderChartConfig(), 50);
+      
+      // Update checkboxes in dropdown
+      dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = !cb.checked;
+      });
+    });
+    
+    buttonRow.appendChild(allBtn);
+    buttonRow.appendChild(noneBtn);
+    buttonRow.appendChild(invertBtn);
+    dropdown.appendChild(buttonRow);
+    
+    // Add checkboxes for each dataset
+    datasets.forEach(ds => {
+      // Determine if this dataset is selected
+      // null/undefined = all selected, [] = none selected, [ids] = specific selected
+      const isChecked = chart.datasetIds === null || chart.datasetIds === undefined || chart.datasetIds.includes(ds.id);
+      
+      const row = document.createElement("div");
+      row.className = "de-dataset-dropdown-row";
+      
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = isChecked;
+      checkbox.style.cursor = "pointer";
+      checkbox.dataset.datasetId = ds.id;
+      
+      const label = document.createElement("span");
+      label.className = "de-dataset-dropdown-label";
+      label.textContent = ds.label;
+      
+      // Let checkbox toggle naturally on click
+      checkbox.addEventListener("change", e => {
+        e.stopPropagation();
+        updateChartDatasets(chart, checkbox.checked, ds.id);
+      });
+      
+      // Clicking label toggles checkbox
+      label.addEventListener("click", e => {
+        e.stopPropagation();
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change'));
+      });
+      
+      row.appendChild(checkbox);
+      row.appendChild(label);
+      dropdown.appendChild(row);
+    });
+    
+    document.getElementById("app").appendChild(dropdown);
+  }
+  
+  function updateChartDatasets(chart, isChecked, datasetId) {
+    
+    // Initialize datasetIds if null/undefined (means "all datasets")
+    if (chart.datasetIds === null || chart.datasetIds === undefined) {
+      chart.datasetIds = datasets.map(d => d.id);
+    }
+    
+    const before = [...chart.datasetIds];
+    
+    if (isChecked) {
+      // Add dataset if not already present
+      if (!chart.datasetIds.includes(datasetId)) {
+        chart.datasetIds.push(datasetId);
+      } else {
+      }
+    } else {
+      // Remove dataset
+      chart.datasetIds = chart.datasetIds.filter(id => id !== datasetId);
+    }
+    
+    // If all datasets are selected, set to null (means "all")
+    if (chart.datasetIds.length === datasets.length) {
+      chart.datasetIds = null;
+    }
+    
+    // Update chart immediately (no delay)
+    renderSingleChart(chart);
+    updateDatasetSelectorText(chart);
+    
+    // Update sidebar checkboxes to stay in sync
+    setTimeout(() => renderChartConfig(), 50);
+  }
+  
+  function updateDatasetSelectorText(chart) {
+    const selector = document.querySelector(`.de-dataset-selector[data-chart-id="${chart.id}"]`);
+    if (!selector) {
+      console.warn("[Data Explorer] Cannot find dataset selector for chart", chart.id);
+      return;
+    }
+    
+    const indicator = selector.querySelector(".de-dataset-indicator");
+    if (!indicator) {
+      console.warn("[Data Explorer] Cannot find dataset indicator for chart", chart.id);
+      return;
+    }
+    
+    // Determine which datasets are used
+    const usedDatasets = chart.datasetIds === null || chart.datasetIds === undefined
+      ? datasets
+      : datasets.filter(ds => chart.datasetIds.includes(ds.id));
+    
+    const text = usedDatasets.length === datasets.length 
+      ? "All datasets" 
+      : usedDatasets.length === 0
+        ? "No datasets"
+        : usedDatasets.map(ds => ds.label).join(", ");
+    
+    indicator.textContent = text;
+  }
+  
+  function updateKpiDatasetSelectorText(kpi) {
+    const selector = document.querySelector(`.de-dataset-selector[data-kpi-id="${kpi.id}"]`);
+    if (!selector) {
+      console.warn("[Data Explorer] Cannot find dataset selector for KPI", kpi.id);
+      return;
+    }
+    
+    const indicator = selector.querySelector(".de-dataset-indicator");
+    if (!indicator) {
+      console.warn("[Data Explorer] Cannot find dataset indicator for KPI", kpi.id);
+      return;
+    }
+    
+    // Determine which datasets are used
+    const usedDatasets = kpi.datasetIds === null || kpi.datasetIds === undefined
+      ? datasets
+      : datasets.filter(ds => kpi.datasetIds.includes(ds.id));
+    
+    const text = usedDatasets.length === datasets.length 
+      ? "All datasets" 
+      : usedDatasets.length === 0
+        ? "No datasets"
+        : usedDatasets.map(ds => ds.label).join(", ");
+    
+    indicator.textContent = text;
+  }
+  
+  function renderSingleKpi(kpi) {
+    
+    const kpiCard = document.querySelector(`.de-kpi-card [data-kpi-id="${kpi.id}"]`)?.closest('.de-kpi-card');
+    if (!kpiCard) {
+      console.warn("[Data Explorer] Cannot find KPI card for", kpi.id);
+      return;
+    }
+    
+    // Resolve which datasets to use
+    // Priority: Global filter > KPI-specific selection > All datasets
+    let usedDatasets;
+    
+    if (globalDatasetFilter !== null) {
+      // Global filter active - use it
+      usedDatasets = datasets.filter(ds => globalDatasetFilter.includes(ds.id));
+    } else {
+      // Use KPI-specific selection
+      usedDatasets = kpi.datasetIds === null || kpi.datasetIds === undefined
+        ? datasets
+        : datasets.filter(ds => kpi.datasetIds.includes(ds.id));
+    }
+    
+    const rows = usedDatasets.flatMap(ds => applyFilters(ds.rows));
+    const dsLabel = usedDatasets.length === datasets.length 
+      ? "All datasets" 
+      : usedDatasets.length === 0
+        ? "No datasets"
+        : usedDatasets.map(ds => ds.label).join(", ");
+    
+    const val = computeAgg(rows, kpi.column, kpi.agg);
+    
+    // Update value
+    const valEl = kpiCard.querySelector('.de-kpi-value');
+    if (valEl) valEl.textContent = formatValue(val, kpi.format);
+    
+    // Update sub-label
+    const subEl = kpiCard.querySelector('.de-kpi-sub');
+    if (subEl) {
+      const aggPart = kpi.agg !== "count" ? `${kpi.agg.toUpperCase()}(${kpi.column})` : "COUNT";
+      subEl.textContent = `${aggPart} · ${dsLabel} · ${rows.length} rows`;
+    }
+    
+    // Update color accent strip
+    if (usedDatasets.length > 0 && usedDatasets.length < datasets.length) {
+      const dsIdx = datasets.findIndex(d => d.id === usedDatasets[0].id);
+      if (dsIdx !== -1) {
+        kpiCard.style.borderTop = `2px solid ${DATASET_COLORS[dsIdx % DATASET_COLORS.length]}`;
+      }
+    } else {
+      kpiCard.style.borderTop = "";
+    }
+    
+  }
+  
+  function renderSingleChart(chart) {
+    
+    const plotDiv = document.querySelector(`.de-chart-plot[data-chart-id="${chart.id}"]`);
+    if (!plotDiv) {
+      console.error("[Data Explorer] Cannot find plot div for chart", chart.id);
+      return;
+    }
+    
+    if (typeof Plotly === "undefined") {
+      console.error("[Data Explorer] Plotly not loaded");
+      return;
+    }
+    
+    const traces = buildChartData(chart);
+    
+    if (!traces || traces.length === 0) {
+      plotDiv.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:0.8rem;">No data</div>`;
+      return;
+    }
+    
+    const layout = buildLayout(chart);
+    
+    // Clear and rebuild plot for reliability
+    try {
+      Plotly.purge(plotDiv);
+      Plotly.newPlot(plotDiv, traces, layout, PLOTLY_CONFIG);
+    } catch (err) {
+      console.error("[Data Explorer] Error rendering chart", chart.id, err);
+    }
+  }
+
+  function renderGrid() {
+    
+    if (typeof Plotly === "undefined") {
+      console.error("[Data Explorer] Plotly not loaded");
+      return;
+    }
+    
+    const grid = document.getElementById("deChartGrid");
+    if (!grid) {
+      console.error("[Data Explorer] Grid container not found");
+      return;
+    }
+    
+
+    // Check if GridStack is available
+    const useGridStack = typeof GridStack !== "undefined" && !presentationMode;
+
+    // Initialize GridStack if not already done and available
+    if (useGridStack && !gridStack) {
+      try {
+        gridStack = GridStack.init({
+          cellHeight: 80,
+          column: 12,
+          margin: 20,  // Increased margin to prevent accidental overlap (was 16px)
+          resizable: { handles: 'se' },
+          draggable: { handle: '.de-chart-title, .de-kpi-label' },  // Allow dragging by chart titles or KPI labels
+          float: true,  // Allow free placement with gaps - GridStack handles collision during drag
+          disableOneColumnMode: true,
+          staticGrid: false,
+          acceptWidgets: false  // Don't accept external widgets
+        }, '#deChartGrid'); // Use selector string instead of element
+
+        // Save layout when user drags or resizes
+        gridStack.on('change', (event, items) => {
+          // Update both chart and KPI objects with new positions/sizes
+          const gridItems = gridStack.getGridItems();
+          gridItems.forEach(el => {
+            const itemId = el.getAttribute('gs-id');
+            const itemType = el.getAttribute('data-type'); // 'chart' or 'kpi'
+            
+            if (itemType === 'chart') {
+              const chart = charts.find(c => c.id === itemId);
+              if (chart) {
+                const node = el.gridstackNode;
+                chart.x = node.x;
+                chart.y = node.y;
+                chart.w = node.w;
+                chart.h = node.h;
+              }
+            } else if (itemType === 'kpi') {
+              const kpi = kpiCards.find(k => k.id === itemId);
+              if (kpi) {
+                const node = el.gridstackNode;
+                kpi.x = node.x;
+                kpi.y = node.y;
+                kpi.w = node.w;
+                kpi.h = node.h;
+              }
+            }
+          });
+        });
+        
+        // Only resize on resizestop - triple resize for stability
+        gridStack.on('resizestop', (event, el) => {
+          const plotDiv = el.querySelector('.js-plotly-plot');
+          if (plotDiv && typeof Plotly !== 'undefined') {
+            // Immediate
+            Plotly.Plots.resize(plotDiv);
+            // First delay
+            setTimeout(() => Plotly.Plots.resize(plotDiv), 100);
+            // Final delay to catch any late layout settling
+            setTimeout(() => {
+              Plotly.Plots.resize(plotDiv);
+            }, 300);
+          }
+        });
+      } catch (err) {
+        console.error("[Data Explorer] GridStack init failed:", err);
+        gridStack = null;
+      }
+    }
+
+    // Clear existing items
+    if (gridStack) {
+      gridStack.removeAll();
+    } else {
+      grid.innerHTML = "";
+    }
+
+    if (!charts.length && !kpiCards.length) {
+      console.warn("[Data Explorer] No charts or KPIs to render");
+      return;
+    }
+    
+    if (!datasets.length) {
+      console.warn("[Data Explorer] No datasets loaded");
+      return;
+    }
+
+    // ── Render KPIs as GridStack items ──
+    kpiCards.forEach((kpi, index) => {
+      // Default position if not set
+      if (kpi.x === undefined) {
+        kpi.x = (index % 4) * 3;  // 4 KPIs per row, each 3 columns wide
+        kpi.y = 0;  // KPIs at top
+        kpi.w = 3;
+        kpi.h = 2;
+      }
+
+      if (gridStack) {
+        // Determine which datasets to use for this KPI
+        let usedDatasets;
+        if (globalDatasetFilter !== null) {
+          usedDatasets = datasets.filter(ds => globalDatasetFilter.includes(ds.id));
+        } else {
+          usedDatasets = kpi.datasetIds === null || kpi.datasetIds === undefined
+            ? datasets
+            : datasets.filter(ds => kpi.datasetIds.includes(ds.id));
+        }
+        
+        const rows = usedDatasets.flatMap(ds => applyFilters(ds.rows));
+        const val = computeAgg(rows, kpi.column, kpi.agg);
+        
+        const dsLabel = usedDatasets.length === datasets.length 
+          ? "All datasets" 
+          : usedDatasets.length === 0
+            ? "No datasets"
+            : usedDatasets.map(ds => ds.label).join(", ");
+        
+        // Color strip for specific datasets
+        let borderStyle = "";
+        if (usedDatasets.length > 0 && usedDatasets.length < datasets.length) {
+          const dsIdx = datasets.findIndex(d => d.id === usedDatasets[0].id);
+          if (dsIdx !== -1) {
+            borderStyle = `border-top: 2px solid ${DATASET_COLORS[dsIdx % DATASET_COLORS.length]};`;
+          }
+        }
+        
+        const aggPart = kpi.agg !== "count" ? `${kpi.agg.toUpperCase()}(${kpi.column})` : "COUNT";
+        
+        const widgetHTML = `
+          <div class="grid-stack-item-content de-kpi-card" style="${borderStyle}">
+            <div class="de-kpi-value">${formatValue(val, kpi.format)}</div>
+            <div class="de-kpi-label">${kpi.label}</div>
+            <div class="de-kpi-sub">${aggPart} · ${dsLabel} · ${rows.length} rows</div>
+            <div class="de-dataset-selector" data-kpi-id="${kpi.id}" style="margin-top: 0.4rem;">
+              <span class="de-dataset-indicator">${dsLabel}</span>
+              <span class="de-dataset-toggle">▼</span>
+            </div>
+          </div>
+        `;
+        
+        const addedEl = gridStack.addWidget({
+          x: kpi.x,
+          y: kpi.y,
+          w: kpi.w,
+          h: kpi.h,
+          minW: 2,   // Minimum 2 columns wide
+          maxW: 6,   // Maximum 6 columns wide (half screen)
+          minH: 2,   // Minimum 2 rows tall
+          maxH: 4,   // Maximum 4 rows tall
+          content: widgetHTML,
+          id: kpi.id
+        });
+        
+        if (addedEl) {
+          addedEl.setAttribute('data-type', 'kpi');  // Mark as KPI for change tracking
+          const heightPx = kpi.h * 80;
+          const widthPercent = (kpi.w / 12) * 100;
+          addedEl.style.height = `${heightPx}px`;
+          addedEl.style.width = `${widthPercent}%`;
+          addedEl.style.position = 'absolute';
+        }
+      }
+    });
+
+    charts.forEach((chart, index) => {
+      
+      // Default position if not set
+      if (chart.x === undefined) {
+        chart.x = (index % 2) * 6;
+        chart.y = Math.floor(index / 2) * 3;
+        chart.w = 6;
+        chart.h = 3;
+      }
+
+      if (gridStack) {
+        // Build dataset selector HTML
+        const usedDatasets = chart.datasetIds === null || chart.datasetIds === undefined
+          ? datasets
+          : datasets.filter(ds => chart.datasetIds.includes(ds.id));
+        
+        const datasetIndicatorText = usedDatasets.length === datasets.length 
+          ? "All datasets" 
+          : usedDatasets.length === 0
+            ? "No datasets"
+            : usedDatasets.map(ds => ds.label).join(", ");
+        
+        // GridStack mode - use HTML string approach (more reliable than createElement)
+        const widgetHTML = `
+          <div class="grid-stack-item-content de-chart-wrap">
+            <div class="de-chart-title">${chart.title}</div>
+            <div class="de-dataset-selector" data-chart-id="${chart.id}">
+              <span class="de-dataset-indicator">${datasetIndicatorText}</span>
+              <span class="de-dataset-toggle">▼</span>
+            </div>
+            <div class="de-chart-plot" data-chart-id="${chart.id}"></div>
+          </div>
+        `;
+        
+        
+        // Let addWidget handle everything
+        const addedEl = gridStack.addWidget({
+          x: chart.x, 
+          y: chart.y, 
+          w: chart.w, 
+          h: chart.h,
+          minW: 3,   // Minimum 3 columns wide (quarter screen)
+          maxW: 12,  // Maximum full width
+          minH: 2,   // Minimum 2 rows tall
+          maxH: 8,   // Maximum 8 rows tall
+          content: widgetHTML,
+          id: chart.id
+        });
+        
+        
+        // CRITICAL: Manually set height - GridStack addWidget doesn't always apply inline styles
+        if (addedEl) {
+          addedEl.setAttribute('data-type', 'chart');  // Mark as chart for change tracking
+          const heightPx = chart.h * 80; // cellHeight = 80px
+          const widthPercent = (chart.w / 12) * 100; // 12 columns
+          
+          addedEl.style.height = `${heightPx}px`;
+          addedEl.style.width = `${widthPercent}%`;
+          addedEl.style.position = 'absolute';
+          
+        }
+        
+        // Find the plot div we just created
+        const plotDiv = addedEl ? addedEl.querySelector('.de-chart-plot') : null;
+        
+        if (!plotDiv) {
+          console.error(`[Data Explorer] Could not find plotDiv after addWidget`);
+          return;
+        }
+        
+
+        // Render Plotly chart
+        const traces = buildChartData(chart);
+        
+        if (!traces?.length) {
+          plotDiv.innerHTML = `<div style="color:var(--text-muted);padding:1rem;font-size:0.8rem;text-align:center;">No data — check field selections.</div>`;
+          return;
+        }
+
+        const layout = buildLayout(chart);
+        setTimeout(() => {
+          Plotly.newPlot(plotDiv, traces, layout, { displayModeBar: false, responsive: true })
+            .then(() => {
+              // Note: responsive:true handles initial sizing automatically
+              // Resize is only needed when GridStack changes size (handled in 'change' event)
+            })
+            .catch(err => console.error(`[Data Explorer] Plotly render failed for chart ${index}:`, err));
+        }, 100);
+
+      } else {
+        // Fallback mode - simple grid (no GridStack)
+        
+        const chartHeight = { small: 200, medium: 280, large: 380, full: 400 }[chart.size || "medium"] || 280;
+        
+        const wrap = document.createElement("div");
+        wrap.className = "de-chart-wrap-fallback";
+        wrap.style.cssText = "background:rgba(30,41,59,0.6);border:1px solid rgba(148,163,184,0.1);border-radius:0.6rem;padding:0.7rem 0.8rem 0.5rem;margin-bottom:0.8rem;";
+
+        const titleEl = document.createElement("div");
+        titleEl.className = "de-chart-title";
+        titleEl.textContent = chart.title;
+        wrap.appendChild(titleEl);
+
+        const plotDiv = document.createElement("div");
+        plotDiv.style.cssText = `width:100%;height:${chartHeight}px;`;
+        wrap.appendChild(plotDiv);
+
+        grid.appendChild(wrap);
+
+        // Render Plotly chart
+        const traces = buildChartData(chart);
+        if (!traces?.length) {
+          plotDiv.innerHTML = `<div style="color:var(--text-muted);padding:1rem;font-size:0.8rem;text-align:center;">No data — check field selections.</div>`;
+          return;
+        }
+
+        const layout = buildLayout(chart);
+        Plotly.newPlot(plotDiv, traces, layout, { displayModeBar: false, responsive: true })
+          .catch(err => console.error(`[Data Explorer] Fallback Plotly render failed for chart ${index}:`, err));
+      }
+    });
+
+    // Compact layout after adding all items
+    if (gridStack) {
+      gridStack.compact();
+    }
+    
+    
+    // DEBUG: Check final DOM state
+    setTimeout(() => {
+      const finalHTML = grid.innerHTML;
+      const itemCount = grid.querySelectorAll('.grid-stack-item').length;
+      if (itemCount === 0 && charts.length > 0) {
+        console.error("[Data Explorer] BUG: Charts were added but not in DOM!");
+      }
+    }, 500);
   }
 
   // ── Dashboard Save/Load ───────────────────────────────────────────────────────
@@ -1089,15 +2183,15 @@
     const exitBtn = document.createElement("button");
     exitBtn.id = "dePresentationExit";
     exitBtn.className = "btn btn-secondary btn-sm";
-    exitBtn.style.cssText = "position:fixed;top:1rem;right:1rem;z-index:9999;";
+    exitBtn.style.cssText = "position:fixed;top:1rem;left:50%;transform:translateX(-50%);z-index:9999;";
     exitBtn.textContent = "✕ Exit Presentation";
     exitBtn.addEventListener("click", exitPresentationMode);
-    document.body.appendChild(exitBtn);
+    document.getElementById("app").appendChild(exitBtn);
 
     document.addEventListener("keydown", handlePresentationKey);
 
     // Re-render charts at full size
-    setTimeout(() => { renderCharts(); renderKpiCards(); }, 100);
+    setTimeout(() => { renderGrid(); renderGrid(); }, 100);
   }
 
   function exitPresentationMode() {
@@ -1106,7 +2200,7 @@
     document.getElementById("dePresentationExit")?.remove();
     document.removeEventListener("keydown", handlePresentationKey);
     presentationMode = false;
-    setTimeout(() => { renderCharts(); renderKpiCards(); }, 100);
+    setTimeout(() => { renderGrid(); renderGrid(); }, 100);
   }
 
   function handlePresentationKey(e) {
@@ -1119,17 +2213,22 @@
   }
 
   function show() {
+    migrateKpiDataFormat(); // Convert old KPI format to new format
     render();
   }
 
   function hide() {
     if (presentationMode) exitPresentationMode();
-    // Purge Plotly instances to free memory
+    
+    // Clean up GridStack
+    if (gridStack) {
+      gridStack.destroy(false); // false = don't remove DOM elements (we're clearing container anyway)
+      gridStack = null;
+    }
+    
     const grid = document.getElementById("deChartGrid");
     if (grid && typeof Plotly !== "undefined") {
-      grid.querySelectorAll("div[class='js-plotly-plot']").forEach(el => {
-        try { Plotly.purge(el); } catch {}
-      });
+      grid.querySelectorAll(".js-plotly-plot").forEach(el => { try { Plotly.purge(el); } catch {} });
     }
     const container = document.getElementById(CONTAINER_ID);
     if (container) container.innerHTML = "";

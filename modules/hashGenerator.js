@@ -123,7 +123,7 @@
               <!-- MD5 -->
               <div class="hash-result-row">
                 <div class="flex items-center justify-between mb-1">
-                  <span style="font-weight:600;font-size:0.8rem;color:#22c55e;">MD5</span>
+                  <span style="font-weight:600;font-size:0.8rem;color:var(--security-success);">MD5</span>
                   <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="md5">
                     Copy
                   </button>
@@ -134,7 +134,7 @@
               <!-- SHA-1 -->
               <div class="hash-result-row">
                 <div class="flex items-center justify-between mb-1">
-                  <span style="font-weight:600;font-size:0.8rem;color:#3b82f6;">SHA-1</span>
+                  <span style="font-weight:600;font-size:0.8rem;color:var(--security-info);">SHA-1</span>
                   <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="sha1">
                     Copy
                   </button>
@@ -145,7 +145,7 @@
               <!-- SHA-256 -->
               <div class="hash-result-row">
                 <div class="flex items-center justify-between mb-1">
-                  <span style="font-weight:600;font-size:0.8rem;color:#f59e0b;">SHA-256</span>
+                  <span style="font-weight:600;font-size:0.8rem;color:var(--security-warning);">SHA-256</span>
                   <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="sha256">
                     Copy
                   </button>
@@ -156,7 +156,7 @@
               <!-- SHA-512 -->
               <div class="hash-result-row">
                 <div class="flex items-center justify-between mb-1">
-                  <span style="font-weight:600;font-size:0.8rem;color:#8b5cf6;">SHA-512</span>
+                  <span style="font-weight:600;font-size:0.8rem;color:var(--accent);">SHA-512</span>
                   <button class="btn btn-secondary btn-xs hash-copy-btn" data-hash-type="sha512">
                     Copy
                   </button>
@@ -189,7 +189,7 @@
       filePanel.classList.add("block");
       textPanel.classList.remove("block");
       textPanel.classList.add("hidden");
-      fileModeBtn.style.background = "#1d4ed8";
+      fileModeBtn.style.background = "var(--accent)";
       textModeBtn.style.background = "#111827";
     });
 
@@ -198,12 +198,12 @@
       filePanel.classList.add("hidden");
       textPanel.classList.remove("hidden");
       textPanel.classList.add("block");
-      textModeBtn.style.background = "#1d4ed8";
+      textModeBtn.style.background = "var(--accent)";
       fileModeBtn.style.background = "#111827";
     });
 
     // Set initial mode
-    fileModeBtn.style.background = "#1d4ed8";
+    fileModeBtn.style.background = "var(--accent)";
 
     // File input
     const fileBtn = rootEl.querySelector("#hashChooseFileBtn");

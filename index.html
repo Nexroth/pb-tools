@@ -34,6 +34,7 @@
   <link rel="apple-touch-icon" sizes="512x512" href="assets/icons/icon-512x512.png">
 
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="lib/gridstack.min.css">
 </head>
 <body>
   <div id="app">
@@ -70,6 +71,14 @@
         >
           <span class="nav-icon">📄</span>
           <span class="nav-label">Report Builder</span>
+        </button>
+
+                <button
+          class="nav-item"
+          data-module="dataExplorer"
+        >
+          <span class="nav-icon">📈</span>
+          <span class="nav-label">Data Explorer</span>
         </button>
 
         <button
@@ -123,7 +132,7 @@
 
       <div class="sidebar-footer">
         <span class="env-badge">Local only</span>
-        <span class="version-badge">v0.6.2</span>
+        <span class="version-badge">v0.7.0</span>
       </div>
     </aside>
 
@@ -242,11 +251,14 @@
   <script src="lib/xlsx.full.min.js"></script>
   <script src="lib/chart.umd.js"></script>
   <script src="lib/jsQR.min.js"></script>
+  <script src="lib/plotly-cartesian.min.js"></script>
+  <script src="lib/gridstack-all.js"></script>
 
   <!-- Core app + modules -->
   <script src="app.js"></script>
   <script src="modules/csvWorkbench.js"></script>
-  <script src="modules/reportBuilder.js"></script> 
+  <script src="modules/reportBuilder.js"></script>
+  <script src="modules/dataExplorer.js"></script> 
   <script src="modules/emailTemplater.js"></script>
   <script src="modules/hashGenerator.js"></script>
   <script src="modules/base64Toolkit.js"></script>

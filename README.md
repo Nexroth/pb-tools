@@ -1,6 +1,6 @@
 # PB Tools
 
-**Version 0.6.2** | Security Operations Toolset | Developer: Raf
+**Version 0.6.3** | Security Operations Toolset | Developer: Raf
 
 Internal web application for CSV analysis, data visualization, email templating, and security operations workflows. All processing occurs client-side for data privacy.
 
@@ -248,6 +248,9 @@ Example:
 ```
 
 ## Version History
+
+**v0.6.2** (March 2026)
+- Formula Wizard
 
 **v0.6.2** (March 2026)
 - Report Builder XLSX export

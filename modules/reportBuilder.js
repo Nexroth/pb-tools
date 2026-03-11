@@ -222,7 +222,7 @@
         
         const itemName = document.createElement("div");
         itemName.className = "template-item-name";
-        itemName.style.color = "#f9fafb";
+        itemName.style.color = "var(--text-primary)";
         itemName.textContent = t.name;
         
         const itemActions = document.createElement("div");
@@ -254,14 +254,14 @@
         if (t.description) {
           const itemDesc = document.createElement("div");
           itemDesc.className = "template-item-desc";
-          itemDesc.style.color = "#d1d5db";
+          itemDesc.style.color = "var(--text-secondary)";
           itemDesc.textContent = t.description;
           item.appendChild(itemDesc);
         }
         
         const itemMeta = document.createElement("div");
         itemMeta.className = "template-item-meta";
-        itemMeta.style.color = "#9ca3af";
+        itemMeta.style.color = "var(--text-secondary)";
         const chartPlural = t.charts.length !== 1 ? 's' : '';
         itemMeta.textContent = t.charts.length + " chart" + chartPlural + " · Created " + new Date(t.createdAt).toLocaleDateString();
         item.appendChild(itemMeta);
@@ -361,7 +361,7 @@
     header.className = "modal-header";
     const headerTitle = document.createElement("h3");
     headerTitle.textContent = "Edit Chart";
-    headerTitle.style.cssText = "margin: 0; font-size: 1.1rem; color: #f9fafb;";
+    headerTitle.style.cssText = "margin: 0; font-size: 1.1rem; color: var(--text-primary);";
     const closeBtn = document.createElement("button");
     closeBtn.className = "modal-close";
     closeBtn.id = "editCloseBtn";
@@ -375,7 +375,7 @@
     const titleGroup = document.createElement("div");
     titleGroup.style.marginBottom = "1rem";
     const titleLabel = document.createElement("label");
-    titleLabel.style.cssText = "display: block; color: #f9fafb; font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;";
+    titleLabel.style.cssText = "display: block; color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem; font-weight: 500;";
     titleLabel.textContent = "Chart Title";
     const titleInput = document.createElement("input");
     titleInput.type = "text";
@@ -383,7 +383,7 @@
     titleInput.setAttribute("autocomplete", "off");
     titleInput.value = chartDef.title || '';
     titleInput.placeholder = "e.g., Failures by Department";
-    titleInput.style.cssText = "width: 100%; background: #1e293b; border: 1px solid #334155; color: #f9fafb; padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-size: 0.9rem; outline: none; font-family: inherit; -webkit-text-fill-color: #f9fafb;";
+    titleInput.style.cssText = "width: 100%; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-size: 0.9rem; outline: none; font-family: inherit; -webkit-text-fill-color: var(--text-primary);";
     titleGroup.appendChild(titleLabel);
     titleGroup.appendChild(titleInput);
     
@@ -477,9 +477,9 @@
 
   const PALETTE = [
     "#22c55e","#22d3ee","#818cf8","#f59e0b","#f87171",
-    "#a78bfa","#34d399","#60a5fa","#fbbf24","#e879f9",
+    "var(--accent)","var(--security-success)","var(--security-info)","#fbbf24","#e879f9",
     "#2dd4bf","#fb923c","#a3e635","#38bdf8","#c084fc",
-    "#4ade80","#facc15","#f472b6","#94a3b8","#fb7185",
+    "var(--security-success)","#facc15","#f472b6","#94a3b8","#fb7185",
   ];
 
   function getCsvApi() {
@@ -540,6 +540,16 @@
 
   function uid() {
     return "chart_" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function getThemeColors() {
+    const app = document.getElementById('app');
+    if (!app) return { info: '#3b82f6', warning: '#f59e0b' }; // fallback
+    const style = getComputedStyle(app);
+    return {
+      info: style.getPropertyValue('--security-info').trim() || '#3b82f6',
+      warning: style.getPropertyValue('--security-warning').trim() || '#f59e0b'
+    };
   }
 
   function buildStandardUI(sessionData, hasData) {
@@ -663,21 +673,21 @@
         <div class="rb-builder">
           <div class="rb-section-title">COMPARISON DATA</div>
           
-          <div class="rb-comparison-datasets">
+          <div class="rb-comparison-datasets" style="display: flex; flex-direction: column; gap: 1rem;">
             <div class="rb-dataset-card" id="rbDatasetCardA">
-              <div class="rb-dataset-header" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+              <div class="rb-dataset-header" style="background: var(--security-info); color: var(--text-primary); padding: 0.5rem 0.75rem; font-weight: 600; border-radius: 0.5rem 0.5rem 0 0;">
                 <span>Dataset A</span>
               </div>
               <div class="rb-dataset-body rb-dropzone" data-dataset="A">
                 ${hasA ? `
                   <div class="rb-dataset-info">
-                    <strong>${escHtml(comparisonMode.datasetA.name)}</strong>
-                    <div class="info-text">${comparisonMode.datasetA.rows.length} rows</div>
+                    <strong style="color: var(--text-primary);">${escHtml(comparisonMode.datasetA.name)}</strong>
+                    <div class="info-text" style="color: var(--text-muted);">${comparisonMode.datasetA.rows.length} rows</div>
                   </div>
                   <button class="btn btn-xs btn-secondary" id="rbClearA">Clear</button>
                 ` : `
-                  <div class="rb-dropzone-icon">📁</div>
-                  <div class="rb-dropzone-text">Drop CSV here or</div>
+                  <div class="rb-dropzone-icon" style="font-size: 2rem; opacity: 0.4;">📁</div>
+                  <div class="rb-dropzone-text" style="color: var(--text-muted); margin: 0.5rem 0;">Drop CSV here or</div>
                   <input type="file" id="rbFileA" accept=".csv" style="display:none;">
                   <button class="btn btn-sm" id="rbLoadA">Browse</button>
                 `}
@@ -685,19 +695,19 @@
             </div>
             
             <div class="rb-dataset-card" id="rbDatasetCardB">
-              <div class="rb-dataset-header" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+              <div class="rb-dataset-header" style="background: var(--security-warning); color: var(--text-primary); padding: 0.5rem 0.75rem; font-weight: 600; border-radius: 0.5rem 0.5rem 0 0;">
                 <span>Dataset B</span>
               </div>
               <div class="rb-dataset-body rb-dropzone" data-dataset="B">
                 ${hasB ? `
                   <div class="rb-dataset-info">
-                    <strong>${escHtml(comparisonMode.datasetB.name)}</strong>
-                    <div class="info-text">${comparisonMode.datasetB.rows.length} rows</div>
+                    <strong style="color: var(--text-primary);">${escHtml(comparisonMode.datasetB.name)}</strong>
+                    <div class="info-text" style="color: var(--text-muted);">${comparisonMode.datasetB.rows.length} rows</div>
                   </div>
                   <button class="btn btn-xs btn-secondary" id="rbClearB">Clear</button>
                 ` : `
-                  <div class="rb-dropzone-icon">📁</div>
-                  <div class="rb-dropzone-text">Drop CSV here or</div>
+                  <div class="rb-dropzone-icon" style="font-size: 2rem; opacity: 0.4;">📁</div>
+                  <div class="rb-dropzone-text" style="color: var(--text-muted); margin: 0.5rem 0;">Drop CSV here or</div>
                   <input type="file" id="rbFileB" accept=".csv" style="display:none;">
                   <button class="btn btn-sm" id="rbLoadB">Browse</button>
                 `}
@@ -743,7 +753,7 @@
             <div class="rb-comparison-stats" id="rbCompStats" style="margin-top: 1.5rem;">
             </div>
           ` : `
-            <div class="info-text" style="margin-top: 1rem; text-align: center;">
+            <div class="info-text" style="margin-top: 1rem; text-align: center; color: var(--text-muted);">
               Load both datasets to start comparing
             </div>
           `}
@@ -952,7 +962,7 @@
     }).join("\n");
 
     // Embed Chart.js inline for standalone HTML (no CDN, no external dependencies)
-    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + escHtml(reportTitle) + '</title>\n<script>\n' + chartJsCode + '\n<\/script>\n<style>\n  *,*::before,*::after{box-sizing:border-box}\n  body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f9fafb;margin:0;padding:1.5rem 2rem;min-height:100vh}\n  h1{font-size:1.4rem;margin:0 0 0.25rem;font-weight:700}\n  .report-meta{font-size:0.78rem;color:#6b7280;margin-bottom:2rem}\n  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.5rem}\n  .chart-card{background:#1e293b;border-radius:0.75rem;border:1px solid rgba(148,163,184,0.15);padding:1.25rem 1.5rem;break-inside:avoid;page-break-inside:avoid}\n  .chart-title{font-size:1rem;font-weight:600;margin:0 0 0.2rem;color:#f9fafb}\n  .chart-meta{font-size:0.72rem;color:#6b7280;margin:0 0 1rem}\n  .chart-wrap{position:relative;height:300px}\n  .chart-wrap--pie{height:280px;max-width:380px;margin:0 auto}\n  .chart-note{background:rgba(167,139,250,0.1);border-left:3px solid #a78bfa;padding:0.75rem 1rem;margin:1rem 0 0;border-radius:0.375rem;font-size:0.85rem;line-height:1.5;color:#9ca3af;font-style:italic}\n</style>\n</head>\n<body>\n<h1>' + escHtml(reportTitle) + '</h1>\n<div class="report-meta">Generated ' + new Date().toLocaleString() + ' &mdash; ' + reportCharts.length + ' chart' + (reportCharts.length !== 1 ? "s" : "") + '</div>\n<div class="charts-grid">\n' + chartsHtml + '\n</div>\n</body>\n</html>';
+    const html = '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>' + escHtml(reportTitle) + '</title>\n<script>\n' + chartJsCode + '\n<\/script>\n<style>\n  *,*::before,*::after{box-sizing:border-box}\n  body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#f9fafb;margin:0;padding:1.5rem 2rem;min-height:100vh}\n  h1{font-size:1.4rem;margin:0 0 0.25rem;font-weight:700}\n  .report-meta{font-size:0.78rem;color:#6b7280;margin-bottom:2rem}\n  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.5rem}\n  .chart-card{background:#1e293b;border-radius:0.75rem;border:1px solid rgba(148,163,184,0.15);padding:1.25rem 1.5rem;break-inside:avoid;page-break-inside:avoid}\n  .chart-title{font-size:1rem;font-weight:600;margin:0 0 0.2rem;color:#f9fafb}\n  .chart-meta{font-size:0.72rem;color:#6b7280;margin:0 0 1rem}\n  .chart-wrap{position:relative;height:300px}\n  .chart-wrap--pie{height:280px;max-width:380px;margin:0 auto}\n  .chart-note{background:rgba(167,139,250,0.1);border-left:3px solid var(--accent);padding:0.75rem 1rem;margin:1rem 0 0;border-radius:0.375rem;font-size:0.85rem;line-height:1.5;color:#9ca3af;font-style:italic}\n</style>\n</head>\n<body>\n<h1>' + escHtml(reportTitle) + '</h1>\n<div class="report-meta">Generated ' + new Date().toLocaleString() + ' &mdash; ' + reportCharts.length + ' chart' + (reportCharts.length !== 1 ? "s" : "") + '</div>\n<div class="charts-grid">\n' + chartsHtml + '\n</div>\n</body>\n</html>';
 
     const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
     const url  = URL.createObjectURL(blob);
@@ -1433,11 +1443,13 @@
   }
 
   function setupDropzone(dropzone, dataset) {
+    const colors = getThemeColors();
+    
     dropzone.addEventListener("dragover", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      dropzone.style.borderColor = "#3b82f6";
-      dropzone.style.background = "rgba(59, 130, 246, 0.1)";
+      dropzone.style.borderColor = colors.info;
+      dropzone.style.background = `rgba(${parseInt(colors.info.slice(1,3), 16)}, ${parseInt(colors.info.slice(3,5), 16)}, ${parseInt(colors.info.slice(5,7), 16)}, 0.1)`;
     });
 
     dropzone.addEventListener("dragleave", (e) => {
@@ -1472,12 +1484,12 @@
         <div class="section-card-header">Comparison Stats</div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 1rem;">
           <div>
-            <div style="font-weight: 600; color: #3b82f6; margin-bottom: 0.5rem;">Dataset A</div>
+            <div style="font-weight: 600; color: var(--security-info); margin-bottom: 0.5rem;">Dataset A</div>
             <div class="info-text">Total: ${totalA}</div>
             <div class="info-text">Unique values: ${uniqueA}</div>
           </div>
           <div>
-            <div style="font-weight: 600; color: #f59e0b; margin-bottom: 0.5rem;">Dataset B</div>
+            <div style="font-weight: 600; color: var(--security-warning); margin-bottom: 0.5rem;">Dataset B</div>
             <div class="info-text">Total: ${totalB}</div>
             <div class="info-text">Unique values: ${uniqueB}</div>
           </div>
@@ -1492,6 +1504,7 @@
 
   function renderComparisonChart(canvasId, chartDef) {
     const { type, dataA, dataB, title } = chartDef;
+    const colors = getThemeColors();
     
     // Combine all unique labels from both datasets
     const allLabels = [...new Set([...dataA.map(d => d.label), ...dataB.map(d => d.label)])];
@@ -1521,15 +1534,15 @@
           {
             label: comparisonMode.datasetA.name || "Dataset A",
             data: valuesA,
-            backgroundColor: "#3b82f6",
-            borderColor: "#2563eb",
+            backgroundColor: colors.info,
+            borderColor: colors.info,
             borderWidth: 1,
           },
           {
             label: comparisonMode.datasetB.name || "Dataset B",
             data: valuesB,
-            backgroundColor: "#f59e0b",
-            borderColor: "#d97706",
+            backgroundColor: colors.warning,
+            borderColor: colors.warning,
             borderWidth: 1,
           }
         ]

@@ -1036,15 +1036,21 @@
       clearBtn.style.cssText = "font-size:0.68rem;padding:0.1rem 0.4rem;";
       clearBtn.textContent = hasPreset ? "Unapply preset" : "Clear all filters";
       clearBtn.addEventListener("click", () => {
-        rowFilters = [];
-        viewState.activePreset = null;
-        renderRowFilterBadges();
-        renderTablePreview();
-        renderSummaryPanel();
-        updateFileInfo();  // Clear preset badge from top
-        // Refresh Presets panel if it's open
-        if (drawerState.open && drawerState.panel === "presets") {
-          renderDrawerPanel("presets");
+        if (hasPreset) {
+          // Unapply preset: clear only the active preset state, keep all transformations
+          viewState.activePreset = null;
+          updateFileInfo();  // Clear preset badge from top
+          renderRowFilterBadges();  // Refresh to update button text and preset badge
+          // Refresh Presets panel if it's open to remove highlight
+          if (drawerState.open && drawerState.panel === "presets") {
+            renderDrawerPanel("presets");
+          }
+        } else {
+          // Clear all filters: remove row filters when no active preset
+          rowFilters = [];
+          renderRowFilterBadges();
+          renderTablePreview();
+          renderSummaryPanel();
         }
       });
       bar.appendChild(clearBtn);
@@ -1409,12 +1415,26 @@
         if (parsedData) {
           const applyBtn = document.createElement("button");
           applyBtn.className   = "btn btn-ghost preset-apply-btn";
-          applyBtn.textContent = viewState.activePreset === p.id ? "✓ Applied" : "Apply";
-          applyBtn.disabled    = viewState.activePreset === p.id;
-          applyBtn.addEventListener("click", () => {
-            applyUserPreset(p);
-            renderDrawerPanel("presets");
-          });
+          
+          if (viewState.activePreset === p.id) {
+            // Preset is active - show Unapply button
+            applyBtn.textContent = "Unapply";
+            applyBtn.disabled = false;
+            applyBtn.addEventListener("click", () => {
+              viewState.activePreset = null;
+              updateFileInfo();
+              renderRowFilterBadges();
+              renderDrawerPanel("presets");
+            });
+          } else {
+            // Preset is not active - show Apply button
+            applyBtn.textContent = "Apply";
+            applyBtn.addEventListener("click", () => {
+              applyUserPreset(p);
+              renderDrawerPanel("presets");
+            });
+          }
+          
           actions.appendChild(applyBtn);
         }
 
@@ -1625,7 +1645,7 @@
             renderDrawerPanel("presets");
           } else {
             saveStatus.textContent = `"${name}" already exists. Click Save again to overwrite.`;
-            saveStatus.style.color = "#f59e0b";
+            saveStatus.style.color = "var(--security-warning)";
             saveStatus.dataset.awaitingOverwrite = "1";
             setTimeout(() => {
               saveStatus.textContent = "";
@@ -1795,6 +1815,7 @@
 
     viewState.activePreset = preset.id;
     updateFileInfo();
+    renderRowFilterBadges();  // Show unapply button and preset badge in filter bar
     renderTablePreview();
     renderSummaryPanel();
   }
@@ -2167,7 +2188,7 @@
         hint.className = "panel-hint";
         hint.style.padding = "1rem";
         hint.style.textAlign = "center";
-        hint.style.color = "#f59e0b";
+        hint.style.color = "var(--security-warning)";
         hint.innerHTML = "<strong>⚠️ No CSV loaded</strong><br><br>Load a CSV file first, then return here to configure note persistence.";
         configSection.appendChild(hint);
         tabContent.appendChild(configSection);
@@ -2227,7 +2248,7 @@
       if (detected.primary) {
         const autoHint = document.createElement("div");
         autoHint.className = "panel-hint";
-        autoHint.style.color = "#10b981";
+        autoHint.style.color = "var(--security-success)";
         autoHint.style.marginTop = "0.25rem";
         autoHint.textContent = `✓ Auto-detected: ${detected.primary}`;
         configSection.appendChild(autoHint);
@@ -2263,7 +2284,7 @@
       if (detected.secondary) {
         const autoHint = document.createElement("div");
         autoHint.className = "panel-hint";
-        autoHint.style.color = "#10b981";
+        autoHint.style.color = "var(--security-success)";
         autoHint.style.marginTop = "0.25rem";
         autoHint.textContent = `✓ Auto-detected: ${detected.secondary}`;
         configSection.appendChild(autoHint);
@@ -2299,7 +2320,7 @@
       if (detected.context) {
         const autoHint = document.createElement("div");
         autoHint.className = "panel-hint";
-        autoHint.style.color = "#10b981";
+        autoHint.style.color = "var(--security-success)";
         autoHint.style.marginTop = "0.25rem";
         autoHint.textContent = `✓ Auto-detected: ${detected.context}`;
         configSection.appendChild(autoHint);
@@ -2354,7 +2375,7 @@
       const protectNotice = document.createElement("div");
       protectNotice.className = "panel-hint";
       protectNotice.style.marginTop = "0.75rem";
-      protectNotice.style.color = "#6b7280";
+      protectNotice.style.color = "var(--text-muted)";
       protectNotice.innerHTML = "🔒 Key columns will be <strong>read-only</strong> to prevent breaking note links.";
       configSection.appendChild(protectNotice);
       
@@ -2418,16 +2439,16 @@
       
       if (activeConfig) {
         statusBox.innerHTML = `
-          <div style="color: #10b981; font-weight: 600;">✓ Persistent Mode</div>
-          <div style="margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">
+          <div style="color: var(--security-success); font-weight: 600;">✓ Persistent Mode</div>
+          <div style="margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-muted);">
             Active: ${activeConfig.name}<br>
             Notes will persist across CSV loads
           </div>
         `;
       } else {
         statusBox.innerHTML = `
-          <div style="color: #f59e0b; font-weight: 600;">⚠️ Temporary Mode</div>
-          <div style="margin-top: 0.25rem; font-size: 0.875rem; color: #6b7280;">
+          <div style="color: var(--security-warning); font-weight: 600;">⚠️ Temporary Mode</div>
+          <div style="margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-muted);">
             Notes will be lost on refresh<br>
             Save a configuration to enable persistence
           </div>
@@ -2472,7 +2493,7 @@
         nameEl.className = "note-config-name";
         nameEl.textContent = config.name;
         if (activeConfig?.id === config.id) {
-          nameEl.innerHTML += ' <span style="color: #10b981; font-size: 0.875rem;">✓ Active</span>';
+          nameEl.innerHTML += ' <span style="color: var(--security-success); font-size: 0.875rem;">✓ Active</span>';
         }
         header.appendChild(nameEl);
         
@@ -2483,7 +2504,7 @@
         
         const keyInfo = document.createElement("div");
         keyInfo.style.fontSize = "0.875rem";
-        keyInfo.style.color = "#6b7280";
+        keyInfo.style.color = "var(--text-muted)";
         const parts = [];
         if (config.keyColumns.primary) parts.push(config.keyColumns.primary);
         if (config.keyColumns.secondary) parts.push(`+ ${config.keyColumns.secondary}`);
@@ -2493,7 +2514,7 @@
         
         const metadata = document.createElement("div");
         metadata.style.fontSize = "0.75rem";
-        metadata.style.color = "#9ca3af";
+        metadata.style.color = "var(--text-secondary)";
         metadata.style.marginTop = "0.25rem";
         
         const created = new Date(config.createdAt);
@@ -2543,7 +2564,7 @@
           if (!confirming) {
             confirming = true;
             deleteBtn.textContent = "Sure? Click again";
-            deleteBtn.style.backgroundColor = "#fee2e2";
+            deleteBtn.style.backgroundColor = "var(--security-danger-bg)";
             confirmTimeout = setTimeout(() => {
               confirming = false;
               deleteBtn.textContent = "Delete";
@@ -2661,7 +2682,7 @@
       dedupMsg.textContent = removed > 0
         ? `✓ Removed ${removed.toLocaleString()} duplicate${removed !== 1 ? "s" : ""}.`
         : "No duplicates found.";
-      dedupMsg.style.color = removed > 0 ? "#4ade80" : "#6b7280";
+      dedupMsg.style.color = removed > 0 ? "var(--security-success)" : "var(--text-muted)";
 
       updateFileInfo();
       renderTablePreview();
@@ -2750,7 +2771,7 @@
 
       if (targetFields.length === 0) {
         cleanMsg.textContent = "No editable columns selected.";
-        cleanMsg.style.color = "#f87171";
+        cleanMsg.style.color = "var(--security-danger)";
         return;
       }
 
@@ -2797,7 +2818,7 @@
       cleanMsg.textContent = changed > 0
         ? `✓ Updated ${changed.toLocaleString()} cell${changed !== 1 ? "s" : ""}.`
         : "No changes made.";
-      cleanMsg.style.color = changed > 0 ? "#4ade80" : "#6b7280";
+      cleanMsg.style.color = changed > 0 ? "var(--security-success)" : "var(--text-muted)";
 
       renderTablePreview();
       renderSummaryPanel();
@@ -2962,12 +2983,12 @@
 
         if (!keyA || !keyB) {
           joinMsg.textContent = "Select key columns on both sides.";
-          joinMsg.style.color = "#f87171";
+          joinMsg.style.color = "var(--security-danger)";
           return;
         }
         if (!importFields.length) {
           joinMsg.textContent = "Select at least one column to bring in.";
-          joinMsg.style.color = "#f87171";
+          joinMsg.style.color = "var(--security-danger)";
           return;
         }
 
@@ -3010,7 +3031,7 @@
         });
 
         joinMsg.textContent = `✓ Matched ${matched.toLocaleString()} rows. ${unmatched > 0 ? `${unmatched.toLocaleString()} rows had no match (set to "${fallback || "blank"}").` : "All rows matched."}`;
-        joinMsg.style.color = unmatched > 0 ? "#f59e0b" : "#4ade80";
+        joinMsg.style.color = unmatched > 0 ? "var(--security-warning)" : "var(--security-success)";
 
         renderColumnsPanel(parsedData.fields);
         renderTablePreview();
@@ -3027,12 +3048,12 @@
         complete: results => {
           lookupData = { fields: results.meta.fields || [], rows: results.data || [] };
           joinFileStatus.textContent = `✓ ${file.name} — ${lookupData.rows.length.toLocaleString()} rows, ${lookupData.fields.length} columns`;
-          joinFileStatus.style.color = "#4ade80";
+          joinFileStatus.style.color = "var(--security-success)";
           buildJoinConfig();
         },
         error: err => {
           joinFileStatus.textContent = `Error: ${err.message}`;
-          joinFileStatus.style.color = "#f87171";
+          joinFileStatus.style.color = "var(--security-danger)";
         },
       });
     }
@@ -3410,7 +3431,7 @@
           inp.type = "text";
           inp.value = row[f] ?? "";
           inp.style.cssText = "width:100%;padding:0.2rem 0.35rem;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:0.2rem;color:var(--text-primary);font-size:0.8rem;outline:none;box-sizing:border-box;";
-          inp.addEventListener("focus", () => { inp.style.borderColor = "#a78bfa"; inp.style.background = "var(--bg-tertiary)"; });
+          inp.addEventListener("focus", () => { inp.style.borderColor = "var(--accent)"; inp.style.background = "var(--bg-tertiary)"; });
           inp.addEventListener("blur", () => {
             row[f] = inp.value;
             inp.style.borderColor = "var(--border-color)";
@@ -3446,7 +3467,7 @@
 
     // Error msg
     const errorMsg = document.createElement("div");
-    errorMsg.style.cssText = "color:#ef4444;font-size:0.82rem;display:none;";
+    errorMsg.style.cssText = "color:var(--security-danger);font-size:0.82rem;display:none;";
     panel.appendChild(errorMsg);
 
     // Action buttons
@@ -3554,7 +3575,7 @@
         typeBadge.textContent = calcType === "lookup" ? "LOOKUP" : "SIMPLE";
         typeBadge.style.cssText = `font-size:0.62rem;padding:0.1rem 0.35rem;border-radius:999px;font-weight:600;flex-shrink:0;
           background:${calcType === "lookup" ? "rgba(167,139,250,0.15)" : "rgba(96,165,250,0.12)"};
-          color:${calcType === "lookup" ? "#a78bfa" : "#60a5fa"};
+          color:${calcType === "lookup" ? "var(--accent)" : "var(--security-info)"};
           border:1px solid ${calcType === "lookup" ? "rgba(167,139,250,0.3)" : "rgba(96,165,250,0.2)"};`;
 
         const btnGroup = document.createElement("div");
@@ -3701,12 +3722,12 @@
         const t = refTables[id];
         return `<code>${id}</code> ${t.name}`;
       }).join("<br>");
-      refHint.innerHTML = `<span style="color:#a78bfa;font-weight:600;">Tables:</span><br>${lines}`;
+      refHint.innerHTML = `<span style="color:var(--accent);font-weight:600;">Tables:</span><br>${lines}`;
       simpleForm.appendChild(refHint);
     }
 
     const simpleError = document.createElement("div");
-    simpleError.style.cssText = "color:#ef4444;font-size:0.82rem;margin-top:0.4rem;display:none;";
+    simpleError.style.cssText = "color:var(--security-danger);font-size:0.82rem;margin-top:0.4rem;display:none;";
     simpleForm.appendChild(simpleError);
 
     const addSimpleBtn = applyButton("Add Formula Column");
@@ -3760,7 +3781,21 @@
       tplBtn.className = "btn btn-secondary btn-sm";
       tplBtn.style.cssText = "width:100%;margin-top:0.3rem;text-align:left;padding:0.35rem 0.5rem;white-space:normal;";
       tplBtn.innerHTML = `<span style="font-weight:600;display:block;">${tpl.label}</span><span style="font-size:0.72rem;opacity:0.7;display:block;white-space:normal;word-break:break-word;">${tpl.description}</span>`;
-      tplBtn.addEventListener("click", () => showFormulaWizard(container, null, tpl.config));
+      tplBtn.addEventListener("click", () => {
+        if (tpl.formula) {
+          // Direct formula insertion - switch to manual mode and pre-fill
+          modeSimpleBtn.className = "btn btn-sm";
+          modeWizardBtn.className = "btn btn-secondary btn-sm";
+          simpleForm.style.display = "";
+          wizardPlaceholder.style.display = "none";
+          nameInput.value = tpl.name || "";
+          formulaInput.value = tpl.formula;
+          formulaInput.focus();
+        } else {
+          // Launch wizard with pre-filled config
+          showFormulaWizard(container, null, tpl.config);
+        }
+      });
       wizardPlaceholder.appendChild(tplBtn);
     });
 
@@ -3816,7 +3851,7 @@
       {
         label: "Ratio (A ÷ B)",
         description: "Simple ratio between two columns",
-        config: { type: "lookup_rate", numeratorCol: col1, denominatorType: "column", denominatorCol: col2, multiplier: 1, name: "Ratio" }
+        config: { type: "division", numeratorCol: col1, denominatorType: "column", denominatorCol: col2, name: "Ratio" }
       },
       {
         label: "Difference (A − B)",
@@ -3824,11 +3859,23 @@
         config: { type: "difference", col1: col1, col2: col2, name: "Difference" }
       },
       {
-        label: "Weighted Score",
-        description: "Column × weight from reference table",
-        config: { type: "lookup_rate", numeratorCol: col1, denominatorType: firstRef ? "lookup" : "column", denominatorCol: col2,
-          lookupTable: firstRef, lookupMatchCol: strCol, lookupReturnCol: firstRefTable?.fields?.[1] || "Value",
-          multiplier: 1, name: "Weighted_Score" }
+        label: "Product (A × B)",
+        description: "Multiply two columns",
+        config: { type: "product", col1: col1, col2: col2, name: "Product" }
+      },
+      {
+        label: "Count-Based Rate",
+        description: "Each row = 1 event. Rate per capita. Use SUM in Data Explorer.",
+        formula: firstRef 
+          ? `1 / LOOKUP('${firstRef}', {${strCol}}, ${firstRefTable?.fields?.[1] || "Headcount"}) * 100`
+          : `1 / {${col2}} * 100`,
+        name: "Event_Rate_Pct"
+      },
+      {
+        label: "Percentage Change",
+        description: "(New − Old) ÷ Old × 100",
+        formula: `({${col2}} - {${col1}}) / {${col1}} * 100`,
+        name: "Pct_Change"
       },
     ];
     return templates;
@@ -3865,6 +3912,7 @@
     typeSelect.className = "panel-input";
     [
       { value: "lookup_rate", label: "Rate / Percentage  (A ÷ B × multiplier)" },
+      { value: "division",    label: "Division  (A ÷ B)" },
       { value: "difference",  label: "Difference  (A − B)" },
       { value: "product",     label: "Product  (A × B)" },
       { value: "sum",         label: "Sum  (A + B)" },
@@ -3884,7 +3932,7 @@
 
     // ── Live formula preview ────────────────────────────────────────
     const previewBox = document.createElement("div");
-    previewBox.style.cssText = "background:var(--bg-tertiary);border-radius:0.3rem;padding:0.4rem 0.6rem;font-family:monospace;font-size:0.8rem;color:#a78bfa;word-break:break-all;min-height:2rem;border:1px solid rgba(167,139,250,0.2);";
+    previewBox.style.cssText = "background:var(--bg-tertiary);border-radius:0.3rem;padding:0.4rem 0.6rem;font-family:monospace;font-size:0.8rem;color:var(--accent);word-break:break-all;min-height:2rem;border:1px solid rgba(167,139,250,0.2);";
     previewBox.textContent = "…";
     panel.appendChild(previewBox);
 
@@ -3903,7 +3951,7 @@
 
     // ── Error msg ───────────────────────────────────────────────────
     const errorMsg = document.createElement("div");
-    errorMsg.style.cssText = "color:#ef4444;font-size:0.82rem;display:none;";
+    errorMsg.style.cssText = "color:var(--security-danger);font-size:0.82rem;display:none;";
     panel.appendChild(errorMsg);
 
     // ── Buttons ─────────────────────────────────────────────────────
@@ -4003,6 +4051,17 @@
       if (type === "sum") {
         return `{${cfg.col1 || "A"}} + {${cfg.col2 || "B"}}`;
       }
+      if (type === "division") {
+        // Division: numerator / denominator (no multiplier)
+        const num = `{${cfg.numeratorCol || "Numerator"}}`;
+        let denom;
+        if (cfg.denominatorType === "lookup" && cfg.lookupTable) {
+          denom = `LOOKUP('${cfg.lookupTable}', ${cfg.lookupMatchCol || "MatchCol"}, ${cfg.lookupReturnCol || "ValueCol"})`;
+        } else {
+          denom = `{${cfg.denominatorCol || "Denominator"}}`;
+        }
+        return `${num} / ${denom}`;
+      }
       // lookup_rate: numerator / denominator * multiplier
       const num = `{${cfg.numeratorCol || "Numerator"}}`;
       let denom;
@@ -4027,12 +4086,12 @@
       const type = typeSelect.value;
       currentConfig.type = type;
 
-      if (type === "lookup_rate") {
+      if (type === "lookup_rate" || type === "division") {
         // Step 1: Numerator column
         const step1 = document.createElement("div");
         step1.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(96,165,250,0.4);";
         const s1title = document.createElement("div");
-        s1title.style.cssText = "font-size:0.75rem;font-weight:600;color:#60a5fa;margin-bottom:0.35rem;";
+        s1title.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--security-info);margin-bottom:0.35rem;";
         s1title.textContent = "Step 1 — Numerator";
         step1.appendChild(s1title);
         const { wrap: numWrap, sel: numSel } = makeColSelect("Column", currentConfig.numeratorCol);
@@ -4045,7 +4104,7 @@
         const step2 = document.createElement("div");
         step2.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(167,139,250,0.4);";
         const s2title = document.createElement("div");
-        s2title.style.cssText = "font-size:0.75rem;font-weight:600;color:#a78bfa;margin-bottom:0.35rem;";
+        s2title.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--accent);margin-bottom:0.35rem;";
         s2title.textContent = "Step 2 — Denominator";
         step2.appendChild(s2title);
 
@@ -4144,42 +4203,163 @@
         step2.appendChild(denomLookupWrap);
         stepsWrap.appendChild(step2);
 
-        // Step 3: Multiplier
-        const step3 = document.createElement("div");
-        step3.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(52,211,153,0.4);";
-        const s3title = document.createElement("div");
-        s3title.style.cssText = "font-size:0.75rem;font-weight:600;color:#34d399;margin-bottom:0.35rem;";
-        s3title.textContent = "Step 3 — Format";
-        step3.appendChild(s3title);
+        // Step 3: Multiplier (only for lookup_rate, not division)
+        if (type === "lookup_rate") {
+          const step3 = document.createElement("div");
+          step3.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(52,211,153,0.4);";
+          const s3title = document.createElement("div");
+          s3title.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--security-success);margin-bottom:0.35rem;";
+          s3title.textContent = "Step 3 — Format";
+          step3.appendChild(s3title);
 
-        const multRow = document.createElement("div");
-        multRow.style.cssText = "display:flex;gap:0.3rem;flex-wrap:wrap;";
-        [
-          { label: "Raw (÷ only)", value: 1 },
-          { label: "Percentage (× 100)", value: 100 },
-          { label: "Per 1,000 (× 1000)", value: 1000 },
-        ].forEach(opt => {
-          const btn = document.createElement("button");
-          btn.className = (currentConfig.multiplier ?? 100) == opt.value ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
-          btn.style.cssText = "flex:1;min-width:5rem;font-size:0.72rem;";
-          btn.textContent = opt.label;
-          btn.addEventListener("click", () => {
-            currentConfig.multiplier = opt.value;
-            multRow.querySelectorAll("button").forEach(b => b.className = "btn btn-secondary btn-xs btn-sm");
-            btn.className = "btn btn-xs btn-sm";
-            updatePreview();
+          const multRow = document.createElement("div");
+          multRow.style.cssText = "display:flex;gap:0.3rem;flex-wrap:wrap;";
+          [
+            { label: "Raw (÷ only)", value: 1 },
+            { label: "Percentage (× 100)", value: 100 },
+            { label: "Per 1,000 (× 1000)", value: 1000 },
+          ].forEach(opt => {
+            const btn = document.createElement("button");
+            btn.className = (currentConfig.multiplier ?? 100) == opt.value ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
+            btn.style.cssText = "flex:1;min-width:5rem;font-size:0.72rem;";
+            btn.textContent = opt.label;
+            btn.addEventListener("click", () => {
+              currentConfig.multiplier = opt.value;
+              multRow.querySelectorAll("button").forEach(b => b.className = "btn btn-secondary btn-xs btn-sm");
+              btn.className = "btn btn-xs btn-sm";
+              updatePreview();
+            });
+            multRow.appendChild(btn);
           });
-          multRow.appendChild(btn);
+          step3.appendChild(multRow);
+          stepsWrap.appendChild(step3);
+        }
+
+      } else if (type === "division") {
+        // Division: numerator / denominator (no multiplier step)
+        
+        // Step 1: Numerator column
+        const step1 = document.createElement("div");
+        step1.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(96,165,250,0.4);";
+        const s1title = document.createElement("div");
+        s1title.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--security-info);margin-bottom:0.35rem;";
+        s1title.textContent = "Step 1 — Numerator";
+        step1.appendChild(s1title);
+        const { wrap: numWrap, sel: numSel } = makeColSelect("Column", currentConfig.numeratorCol);
+        numSel.addEventListener("change", () => { currentConfig.numeratorCol = numSel.value; updatePreview(); });
+        if (!currentConfig.numeratorCol && cols.length) { currentConfig.numeratorCol = numSel.value; }
+        step1.appendChild(numWrap);
+        stepsWrap.appendChild(step1);
+
+        // Step 2: Denominator
+        const step2 = document.createElement("div");
+        step2.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(167,139,250,0.4);";
+        const s2title = document.createElement("div");
+        s2title.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--accent);margin-bottom:0.35rem;";
+        s2title.textContent = "Step 2 — Denominator";
+        step2.appendChild(s2title);
+
+        // Denom type toggle
+        const denomTypeRow = document.createElement("div");
+        denomTypeRow.style.cssText = "display:flex;gap:0.3rem;margin-bottom:0.4rem;";
+        const denomColBtn = document.createElement("button");
+        denomColBtn.className = currentConfig.denominatorType !== "lookup" ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
+        denomColBtn.style.flex = "1";
+        denomColBtn.textContent = "Column";
+        const denomLookupBtn = document.createElement("button");
+        denomLookupBtn.className = currentConfig.denominatorType === "lookup" ? "btn btn-xs btn-sm" : "btn btn-secondary btn-xs btn-sm";
+        denomLookupBtn.style.flex = "1";
+        denomLookupBtn.textContent = "Reference Table";
+        denomTypeRow.appendChild(denomColBtn);
+        denomTypeRow.appendChild(denomLookupBtn);
+        step2.appendChild(denomTypeRow);
+
+        const denomColWrap = document.createElement("div");
+        const denomLookupWrap = document.createElement("div");
+
+        // Column denom
+        const { wrap: dcWrap, sel: dcSel } = makeColSelect("Column", currentConfig.denominatorCol);
+        dcSel.addEventListener("change", () => { currentConfig.denominatorCol = dcSel.value; updatePreview(); });
+        if (!currentConfig.denominatorCol && cols.length) currentConfig.denominatorCol = dcSel.value;
+        denomColWrap.appendChild(dcWrap);
+
+        // Lookup denom
+        const { wrap: rtWrap, sel: rtSel } = makeRefTableSelect("Table", currentConfig.lookupTable);
+        denomLookupWrap.appendChild(rtWrap);
+
+        const lookupMatchRow = document.createElement("div");
+        lookupMatchRow.style.cssText = "display:flex;gap:0.3rem;margin-top:0.3rem;align-items:flex-end;";
+
+        const { wrap: lmWrap, sel: lmSel } = makeColSelect("CSV column to match", currentConfig.lookupMatchCol);
+        const eqLabel = document.createElement("div");
+        eqLabel.style.cssText = "padding-bottom:0.4rem;color:var(--text-muted);font-size:0.8rem;";
+        eqLabel.textContent = "=";
+
+        let rvSel;
+        const rvContainer = document.createElement("div");
+        rvContainer.style.flex = "1";
+
+        function rebuildReturnColSelect() {
+          rvContainer.innerHTML = "";
+          const tableId = rtSel.value;
+          const { wrap: rvWrap, sel: _rvSel } = makeRefColSelect("Table column to get", tableId, currentConfig.lookupReturnCol);
+          rvSel = _rvSel;
+          rvSel.addEventListener("change", () => { currentConfig.lookupReturnCol = rvSel.value; updatePreview(); });
+          if (!currentConfig.lookupReturnCol) currentConfig.lookupReturnCol = rvSel.value;
+          rvContainer.appendChild(rvWrap);
+        }
+
+        rtSel.addEventListener("change", () => {
+          currentConfig.lookupTable = rtSel.value;
+          rebuildReturnColSelect();
+          updatePreview();
         });
-        step3.appendChild(multRow);
-        stepsWrap.appendChild(step3);
+        lmSel.addEventListener("change", () => { currentConfig.lookupMatchCol = lmSel.value; updatePreview(); });
+        if (!currentConfig.lookupMatchCol && cols.length) currentConfig.lookupMatchCol = lmSel.value;
+        if (!currentConfig.lookupTable && refIds.length) currentConfig.lookupTable = rtSel.value;
+
+        rebuildReturnColSelect();
+
+        lookupMatchRow.appendChild(lmWrap);
+        lookupMatchRow.appendChild(eqLabel);
+        lookupMatchRow.appendChild(rvContainer);
+        denomLookupWrap.appendChild(lookupMatchRow);
+
+        // Show/hide denom sections
+        if (currentConfig.denominatorType !== "lookup") {
+          denomLookupWrap.style.display = "none";
+        } else {
+          denomColWrap.style.display = "none";
+        }
+
+        denomColBtn.addEventListener("click", () => {
+          currentConfig.denominatorType = "column";
+          denomColBtn.className = "btn btn-xs btn-sm";
+          denomLookupBtn.className = "btn btn-secondary btn-xs btn-sm";
+          denomColWrap.style.display = "";
+          denomLookupWrap.style.display = "none";
+          updatePreview();
+        });
+        denomLookupBtn.addEventListener("click", () => {
+          if (refIds.length === 0) { alert("Create a reference table first."); return; }
+          currentConfig.denominatorType = "lookup";
+          denomLookupBtn.className = "btn btn-xs btn-sm";
+          denomColBtn.className = "btn btn-secondary btn-xs btn-sm";
+          denomColWrap.style.display = "none";
+          denomLookupWrap.style.display = "";
+          updatePreview();
+        });
+
+        step2.appendChild(denomColWrap);
+        step2.appendChild(denomLookupWrap);
+        stepsWrap.appendChild(step2);
 
       } else {
         // Difference / Product / Sum — just two column pickers
         const stepA = document.createElement("div");
         stepA.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(96,165,250,0.4);";
         const sTitleA = document.createElement("div");
-        sTitleA.style.cssText = "font-size:0.75rem;font-weight:600;color:#60a5fa;margin-bottom:0.35rem;";
+        sTitleA.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--security-info);margin-bottom:0.35rem;";
         sTitleA.textContent = type === "difference" ? "Step 1 — Column A (minuend)" : "Step 1 — Column A";
         stepA.appendChild(sTitleA);
         const { wrap: aWrap, sel: aSel } = makeColSelect("Column", currentConfig.col1);
@@ -4191,7 +4371,7 @@
         const stepB = document.createElement("div");
         stepB.style.cssText = "background:rgba(148,163,184,0.05);border-radius:0.3rem;padding:0.5rem;border-left:2px solid rgba(167,139,250,0.4);";
         const sTitleB = document.createElement("div");
-        sTitleB.style.cssText = "font-size:0.75rem;font-weight:600;color:#a78bfa;margin-bottom:0.35rem;";
+        sTitleB.style.cssText = "font-size:0.75rem;font-weight:600;color:var(--accent);margin-bottom:0.35rem;";
         sTitleB.textContent = type === "difference" ? "Step 2 — Column B (subtrahend)" : "Step 2 — Column B";
         stepB.appendChild(sTitleB);
         const { wrap: bWrap, sel: bSel } = makeColSelect("Column", currentConfig.col2);
@@ -5221,7 +5401,7 @@ function executeFormula(formula, row) {
       info.textContent = previewRows.length < shown
         ? `${shown.toLocaleString()} matches (showing first ${MAX_ROWS}) of ${total.toLocaleString()} rows`
         : `${shown.toLocaleString()} of ${total.toLocaleString()} rows match`;
-      info.style.color = shown === 0 ? "#f87171" : "#60a5fa";
+      info.style.color = shown === 0 ? "var(--security-danger)" : "var(--security-info)";
     } else {
       info.textContent = shown > MAX_ROWS
         ? `Showing first ${MAX_ROWS.toLocaleString()} of ${shown.toLocaleString()} rows.`

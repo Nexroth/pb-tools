@@ -1275,7 +1275,7 @@ Security Team"
       () => {
         const originalText = button.textContent;
         button.textContent = "✓ Copied";
-        button.style.background = "#16a34a";
+        button.style.background = "var(--security-success)";
         setTimeout(() => {
           button.textContent = originalText;
           button.style.background = "";

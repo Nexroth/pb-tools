@@ -156,7 +156,7 @@
       // Drag and drop
       pasteZone.addEventListener("dragover", (e) => {
         e.preventDefault();
-        pasteZone.style.borderColor = "#22c55e";
+        pasteZone.style.borderColor = "var(--security-success)";
         pasteZone.style.background = "rgba(34,197,94,0.08)";
       });
 
@@ -179,7 +179,7 @@
 
       // Visual feedback on focus
       pasteZone.addEventListener("focus", () => {
-        pasteZone.style.borderColor = "#22c55e";
+        pasteZone.style.borderColor = "var(--security-success)";
       });
 
       pasteZone.addEventListener("blur", () => {
@@ -333,7 +333,7 @@
     else if (isWiFi) contentType = "WiFi Credentials";
 
     let verdict = "UNKNOWN";
-    let verdictColor = "#6b7280";
+    let verdictColor = "var(--text-muted)";
     let borderColor = "rgba(107, 116, 128, 0.5)";
     let bgColor = "rgba(107, 116, 128, 0.05)";
     const warnings = [];
@@ -343,7 +343,7 @@
     if (isURL) {
       // Default verdict for URLs - we can't verify legitimacy
       verdict = "VERIFY MANUALLY";
-      verdictColor = "#6b7280";
+      verdictColor = "var(--text-muted)";
       borderColor = "rgba(107, 116, 128, 0.5)";
       bgColor = "rgba(107, 116, 128, 0.05)";
 
@@ -404,7 +404,7 @@
       if (foundKeywords.length >= 2) {
         warnings.push(`🚨 Multiple phishing keywords: ${foundKeywords.join(", ")}`);
         verdict = "HIGH RISK";
-        verdictColor = "#ef4444";
+        verdictColor = "var(--security-danger)";
         borderColor = "rgba(239, 68, 68, 0.5)";
         bgColor = "rgba(239, 68, 68, 0.05)";
       } else if (foundKeywords.length === 1) {
@@ -447,7 +447,7 @@
     // For non-URL content with no warnings
     if (!isURL && warnings.length === 0 && !isWiFi) {
       verdict = "NO WARNINGS";
-      verdictColor = "#6b7280";
+      verdictColor = "var(--text-muted)";
       borderColor = "rgba(107, 116, 128, 0.5)";
       bgColor = "rgba(107, 116, 128, 0.05)";
       infoItems.push("ℹ️ Plain text content - verify context before use");

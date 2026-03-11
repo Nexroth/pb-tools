@@ -195,7 +195,7 @@
 
       dropzone.addEventListener("dragover", (e) => {
         e.preventDefault();
-        dropzone.style.borderColor = "#22c55e";
+        dropzone.style.borderColor = "var(--security-success)";
         dropzone.style.background = "rgba(34,197,94,0.08)";
       });
 
@@ -495,7 +495,7 @@
         // If extraction failed, show warning
         const fileInfo = rootEl.querySelector("#emlFileInfo");
         if (fileInfo) {
-          fileInfo.innerHTML = `<span style="color:#ef4444;">⚠️ PhishER wrapper detected but extraction FAILED. Analyzing wrapper instead of phishing email. This will show incorrect results!</span>`;
+          fileInfo.innerHTML = `<span style="color:var(--security-danger);">⚠️ PhishER wrapper detected but extraction FAILED. Analyzing wrapper instead of phishing email. This will show incorrect results!</span>`;
         }
         
         // Store failure status
@@ -623,13 +623,13 @@
     container.innerHTML = `
       ${showPhisherInfo ? `
         <div style="background:rgba(147,51,234,0.1);border:2px solid rgba(147,51,234,0.5);border-radius:8px;padding:1rem;margin-bottom:1.5rem;">
-          <div style="font-size:1.1rem;font-weight:700;color:#a855f7;margin-bottom:0.75rem;">
+          <div style="font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:0.75rem;">
             📨 PHISHER REPORT DETECTED
           </div>
-          <div style="font-size:0.875rem;color:#9ca3af;margin-bottom:0.75rem;">
+          <div style="font-size:0.875rem;color:var(--text-secondary);margin-bottom:0.75rem;">
             ${extractionWorked ? 
-              `This email was reported as phishing through KnowBe4 PhishER. The analysis below shows the <strong style="color:#22c55e;">embedded phishing email ✓</strong>, not the reporting wrapper.` :
-              `<span style="color:#ef4444;"><strong>⚠️ EXTRACTION FAILED!</strong> Could not extract embedded email. Analysis shows the <strong>reporting wrapper</strong> (incorrect results). Check console for errors.</span>`
+              `This email was reported as phishing through KnowBe4 PhishER. The analysis below shows the <strong style="color:var(--security-success);">embedded phishing email ✓</strong>, not the reporting wrapper.` :
+              `<span style="color:var(--security-danger);"><strong>⚠️ EXTRACTION FAILED!</strong> Could not extract embedded email. Analysis shows the <strong>reporting wrapper</strong> (incorrect results). Check console for errors.</span>`
             }
           </div>
           <div class="eml-grid" style="font-size:0.9rem;">
@@ -644,10 +644,10 @@
             
             ${extractionWorked ? `
               <div class="eml-label">Extraction:</div>
-              <div class="eml-value"><span style="color:#22c55e;font-weight:600;">✓ Success</span></div>
+              <div class="eml-value"><span style="color:var(--security-success);font-weight:600;">✓ Success</span></div>
             ` : `
               <div class="eml-label">Extraction:</div>
-              <div class="eml-value"><span style="color:#ef4444;font-weight:600;">✗ Failed</span></div>
+              <div class="eml-value"><span style="color:var(--security-danger);font-weight:600;">✗ Failed</span></div>
             `}
           </div>
         </div>
@@ -657,7 +657,7 @@
             🚨 EMBEDDED PHISHING EMAIL:
           </div>
         ` : `
-          <div style="font-size:1rem;font-weight:700;color:#ef4444;margin-bottom:1rem;padding:0.75rem;background:rgba(239,68,68,0.1);border-radius:6px;">
+          <div style="font-size:1rem;font-weight:700;color:var(--security-danger);margin-bottom:1rem;padding:0.75rem;background:rgba(239,68,68,0.1);border-radius:6px;">
             ⚠️ WARNING: Analyzing wrapper email (incorrect results)
           </div>
         `}
@@ -722,7 +722,7 @@
     if (spf.includes("fail")) {
       issues.push("❌ SPF authentication failed");
       verdict = "LIKELY SPOOFING";
-      verdictColor = "#ef4444"; // red
+      verdictColor = "var(--security-danger)"; // red
       confidence = "High";
     } else if (spf.includes("softfail")) {
       issues.push("⚠️ SPF soft fail (weak authentication)");
@@ -753,7 +753,7 @@
     if (authResults.includes("dmarc=fail")) {
       issues.push("❌ DMARC authentication failed");
       verdict = "LIKELY SPOOFING";
-      verdictColor = "#ef4444";
+      verdictColor = "var(--security-danger)";
     } else if (authResults.includes("dmarc=pass")) {
       issues.push("✅ DMARC passed");
     }
@@ -958,7 +958,7 @@
     
     if (failCount > 0) {
       status = 'suspicious';
-      color = '#ef4444';
+      color = 'var(--security-danger)';
       bgColor = 'rgba(239,68,68,0.1)';
       borderColor = 'rgba(239,68,68,0.5)';
       verdict = 'SUSPICIOUS';
@@ -1322,7 +1322,7 @@
         ">
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
             <span>${isHigh ? '❌' : isMedium ? '⚠️' : '✅'}</span>
-            <span style="color:${isHigh ? '#ef4444' : isMedium ? '#f59e0b' : '#22c55e'};font-weight:500;">
+            <span style="color:${isHigh ? 'var(--security-danger)' : isMedium ? '#f59e0b' : '#22c55e'};font-weight:500;">
               Spam Score: ${score}
             </span>
             <span style="
@@ -1330,12 +1330,12 @@
               padding:0.15rem 0.4rem;
               border-radius:999px;
               background:${isHigh ? 'rgba(239,68,68,0.2)' : isMedium ? 'rgba(245,158,11,0.2)' : 'rgba(34,197,94,0.2)'};
-              color:${isHigh ? '#ef4444' : isMedium ? '#f59e0b' : '#22c55e'};
+              color:${isHigh ? 'var(--security-danger)' : isMedium ? '#f59e0b' : '#22c55e'};
             ">
               ${isHigh ? 'HIGH' : isMedium ? 'MEDIUM' : 'LOW'}
             </span>
           </div>
-          <div style="color:#9ca3af;font-size:0.7rem;">
+          <div style="color:var(--text-secondary);font-size:0.7rem;">
             Header: ${escapeHtml(xHeaders.spam.header)}
           </div>
         </div>
@@ -1359,7 +1359,7 @@
           <div style="color:#fb923c;font-family:monospace;font-weight:500;">
             ${escapeHtml(xHeaders.originatingIp.ip)}
           </div>
-          <div style="color:#9ca3af;font-size:0.7rem;margin-top:0.25rem;">
+          <div style="color:var(--text-secondary);font-size:0.7rem;margin-top:0.25rem;">
             Header: ${escapeHtml(xHeaders.originatingIp.header)}
           </div>
         </div>
@@ -1380,10 +1380,10 @@
             <span>📧</span>
             <span style="color:#e5e7eb;font-weight:500;">Email Client</span>
           </div>
-          <div style="color:#60a5fa;">
+          <div style="color:var(--security-info);">
             ${escapeHtml(xHeaders.mailer.value)}
           </div>
-          <div style="color:#9ca3af;font-size:0.7rem;margin-top:0.25rem;">
+          <div style="color:var(--text-secondary);font-size:0.7rem;margin-top:0.25rem;">
             Header: ${escapeHtml(xHeaders.mailer.header)}
           </div>
         </div>
@@ -1416,7 +1416,7 @@
               ${escapeHtml(xHeaders.priority.value)}
             </span>
           </div>
-          <div style="color:#9ca3af;font-size:0.7rem;">
+          <div style="color:var(--text-secondary);font-size:0.7rem;">
             Header: ${escapeHtml(xHeaders.priority.header)}
           </div>
         </div>
@@ -1436,7 +1436,7 @@
           padding:0.5rem 0.75rem;
           font-size:0.75rem;
         ">
-          <summary style="cursor:pointer;color:#9ca3af;font-weight:500;">
+          <summary style="cursor:pointer;color:var(--text-secondary);font-weight:500;">
             📋 Additional X-Headers (${xHeaders.other.length})
           </summary>
           <div style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.5rem;">
@@ -1449,7 +1449,7 @@
             background:rgba(0,0,0,0.3);
             border-radius:0.3rem;
           ">
-            <div style="color:#60a5fa;font-size:0.7rem;font-weight:500;margin-bottom:0.15rem;">
+            <div style="color:var(--security-info);font-size:0.7rem;font-weight:500;margin-bottom:0.15rem;">
               ${escapeHtml(header.header)}
             </div>
             <div style="color:#d1d5db;font-size:0.7rem;word-break:break-all;">
@@ -1489,7 +1489,7 @@
     const receivedHeaders = parsedHeaders.receivedHeaders || [];
 
     if (receivedHeaders.length === 0) {
-      container.innerHTML = `<div style="color:#9ca3af;">No routing information found</div>`;
+      container.innerHTML = `<div style="color:var(--text-secondary);">No routing information found</div>`;
       return;
     }
 
@@ -1533,7 +1533,7 @@
               padding:0.15rem 0.4rem;
               border-radius:999px;
               background:rgba(148,163,184,0.2);
-              color:#9ca3af;
+              color:var(--text-secondary);
             ">
               ${displayIndex} of ${totalHops}
             </div>
@@ -1555,22 +1555,22 @@
         <!-- IP and Server Info -->
         <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 0.75rem;margin-bottom:0.5rem;">
           ${hopData.ip ? `
-            <div style="color:#9ca3af;font-weight:500;">🌐 IP:</div>
+            <div style="color:var(--text-secondary);font-weight:500;">🌐 IP:</div>
             <div style="color:#fb923c;font-family:monospace;font-weight:500;">${escapeHtml(hopData.ip)}</div>
           ` : ''}
           
           ${hopData.fromServer ? `
-            <div style="color:#9ca3af;font-weight:500;">📧 From:</div>
-            <div style="color:#60a5fa;font-weight:500;">${escapeHtml(hopData.fromServer)}</div>
+            <div style="color:var(--text-secondary);font-weight:500;">📧 From:</div>
+            <div style="color:var(--security-info);font-weight:500;">${escapeHtml(hopData.fromServer)}</div>
           ` : ''}
           
           ${hopData.byServer ? `
-            <div style="color:#9ca3af;font-weight:500;">📨 To:</div>
-            <div style="color:#60a5fa;">${escapeHtml(hopData.byServer)}</div>
+            <div style="color:var(--text-secondary);font-weight:500;">📨 To:</div>
+            <div style="color:var(--security-info);">${escapeHtml(hopData.byServer)}</div>
           ` : ''}
           
           ${hopData.timestamp ? `
-            <div style="color:#9ca3af;font-weight:500;">🕐 Time:</div>
+            <div style="color:var(--text-secondary);font-weight:500;">🕐 Time:</div>
             <div style="color:#e5e7eb;">${escapeHtml(hopData.timestamp)}</div>
           ` : ''}
         </div>
@@ -1584,20 +1584,20 @@
             ${authAnalysis.checks.map(check => `
               <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
                 <span>${check.icon}</span>
-                <span style="color:${check.status === 'PASS' ? '#22c55e' : check.status === 'FAIL' ? '#ef4444' : '#f59e0b'};font-weight:500;min-width:60px;">${check.label}</span>
-                <span style="color:#9ca3af;">- ${check.detail}</span>
+                <span style="color:${check.status === 'PASS' ? '#22c55e' : check.status === 'FAIL' ? 'var(--security-danger)' : '#f59e0b'};font-weight:500;min-width:60px;">${check.label}</span>
+                <span style="color:var(--text-secondary);">- ${check.detail}</span>
               </div>
             `).join('')}
           </div>
         ` : authAnalysis.status === 'relay' ? `
-          <div style="font-size:0.7rem;color:#9ca3af;margin-top:0.5rem;">
+          <div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.5rem;">
             ℹ️ This is a relay hop (no authentication checks)
           </div>
         ` : ''}
         
         <!-- Expandable Raw Header -->
         <details style="margin-top:0.75rem;">
-          <summary style="cursor:pointer;color:#9ca3af;font-size:0.7rem;">
+          <summary style="cursor:pointer;color:var(--text-secondary);font-size:0.7rem;">
             View Raw Header
           </summary>
           <div style="
@@ -1692,7 +1692,7 @@
     if (spf.includes("fail")) {
       issues.push("❌ SPF authentication failed");
       verdict = "LIKELY SPOOFING";
-      verdictColor = "#ef4444";
+      verdictColor = "var(--security-danger)";
       borderColor = "rgba(239, 68, 68, 0.5)";
       bgColor = "rgba(239, 68, 68, 0.05)";
       confidence = "High";
@@ -1726,7 +1726,7 @@
     } else if (authResults.includes("dkim=fail")) {
       issues.push("❌ DKIM authentication failed");
       verdict = "LIKELY SPOOFING";
-      verdictColor = "#ef4444";
+      verdictColor = "var(--security-danger)";
       borderColor = "rgba(239, 68, 68, 0.5)";
       bgColor = "rgba(239, 68, 68, 0.05)";
       confidence = "High";
@@ -1736,7 +1736,7 @@
     if (authResults.includes("dmarc=fail")) {
       issues.push("❌ DMARC authentication failed");
       verdict = "LIKELY SPOOFING";
-      verdictColor = "#ef4444";
+      verdictColor = "var(--security-danger)";
       borderColor = "rgba(239, 68, 68, 0.5)";
       bgColor = "rgba(239, 68, 68, 0.05)";
     } else if (authResults.includes("dmarc=pass")) {
@@ -1778,7 +1778,7 @@
     if (dangerousAttachments.length > 0) {
       issues.push(`❌ ${dangerousAttachments.length} dangerous attachment(s) detected`);
       verdict = "LIKELY MALICIOUS";
-      verdictColor = "#ef4444";
+      verdictColor = "var(--security-danger)";
       borderColor = "rgba(239, 68, 68, 0.5)";
       bgColor = "rgba(239, 68, 68, 0.05)";
       confidence = "High";
@@ -1822,7 +1822,7 @@
         // Spam score
         const score = xHeaderObj.score;
         const level = score > 5 ? 'High' : score > 2 ? 'Medium' : 'Low';
-        const color = score > 5 ? '#ef4444' : score > 2 ? '#f59e0b' : '#22c55e';
+        const color = score > 5 ? 'var(--security-danger)' : score > 2 ? '#f59e0b' : '#22c55e';
         return `<span style="color:${color};font-weight:600;">${score} (${level})</span>`;
       } else if (xHeaderObj.ip) {
         // IP address
@@ -1967,7 +1967,7 @@
     }
     
     .hop-item.suspicious {
-      border-left-color: #ef4444;
+      border-left-color: var(--security-danger);
       background: rgba(239, 68, 68, 0.05);
     }
     
@@ -2171,7 +2171,7 @@
             This email was reported as phishing through KnowBe4 PhishER. 
             ${analysisResults.phisherInfo.extractionSuccess 
               ? 'The analysis below shows the <strong>embedded phishing email</strong>, not the reporting wrapper.' 
-              : '<strong style="color:#ef4444;">⚠️ Extraction failed</strong> - analyzing reporting wrapper instead.'}
+              : '<strong style="color:var(--security-danger);">⚠️ Extraction failed</strong> - analyzing reporting wrapper instead.'}
           </div>
           <div class="info-grid">
             <div class="info-label">Reported by:</div>
