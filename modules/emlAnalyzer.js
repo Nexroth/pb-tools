@@ -46,31 +46,83 @@
         
         <!-- Upload Section -->
         <div class="section-card">
-          <div class="section-card-header">
-            1. Load EML File
-          </div>
-          
-          <div class="flex gap-3 items-center mb-3">
-            <button class="btn" id="emlFileButton">
-              📧 Choose EML File
-            </button>
-            <button class="btn btn-secondary" id="emlExportButton" style="display:none;">
-              📄 Export Report
-            </button>
-            <button class="btn btn-secondary" id="emlClearButton" style="display:none;">
-              🔄 Clear
-            </button>
-            <input type="file" id="emlFileInput" accept=".eml,.txt,.msg" class="hidden">
-            <span id="emlFileInfo" class="info-text-sm"></span>
+          <div class="flex justify-between items-center mb-3">
+            <div class="section-card-header" style="margin-bottom:0;">
+              1. Load Email Data
+            </div>
+            <div class="flex gap-3 items-center">
+              <button class="btn btn-secondary" id="emlExportButton" style="display:none;">
+                📄 Export Report
+              </button>
+              <button class="btn btn-secondary" id="emlClearButton" style="display:none;">
+                🔄 Clear
+              </button>
+            </div>
           </div>
 
-          <div id="emlDropzone" class="dropzone">
-            <div class="dropzone-icon">📧</div>
-            <div class="dropzone-text">
-              Drop EML file here or click to browse
+          <!-- Tab switcher -->
+          <div class="flex gap-0 mb-3" style="border-bottom:1px solid rgba(148,163,184,0.2);">
+            <button id="emlTabFile" class="eml-tab eml-tab-active" style="
+              padding:0.4rem 1rem;
+              font-size:0.8rem;
+              background:none;
+              border:none;
+              border-bottom:2px solid var(--security-info);
+              color:var(--text-primary);
+              cursor:pointer;
+              margin-bottom:-1px;
+            ">📁 Load File</button>
+            <button id="emlTabPaste" class="eml-tab" style="
+              padding:0.4rem 1rem;
+              font-size:0.8rem;
+              background:none;
+              border:none;
+              border-bottom:2px solid transparent;
+              color:var(--text-secondary);
+              cursor:pointer;
+              margin-bottom:-1px;
+            ">📋 Paste Headers</button>
+          </div>
+
+          <!-- File panel -->
+          <div id="emlPanelFile">
+            <div class="flex gap-3 items-center mb-3">
+              <button class="btn" id="emlFileButton">
+                📧 Choose EML File
+              </button>
+              <input type="file" id="emlFileInput" accept=".eml,.txt,.msg" class="hidden">
+              <span id="emlFileInfo" class="info-text-sm"></span>
             </div>
-            <div class="dropzone-hint">
-              Supports .eml, .msg, and .txt files
+            <div id="emlDropzone" class="dropzone">
+              <div class="dropzone-icon">📧</div>
+              <div class="dropzone-text">
+                Drop EML file here or click to browse
+              </div>
+              <div class="dropzone-hint">
+                Supports .eml, .msg, and .txt files
+              </div>
+            </div>
+          </div>
+
+          <!-- Paste panel -->
+          <div id="emlPanelPaste" style="display:none;">
+            <textarea id="emlPasteInput" placeholder="Paste raw email headers here — from PhishER, Defender, or any header view..." style="
+              width:100%;
+              min-height:160px;
+              background:rgba(15,23,42,0.5);
+              border:1px dashed rgba(148,163,184,0.3);
+              border-radius:6px;
+              padding:0.75rem;
+              color:var(--text-primary);
+              font-family:monospace;
+              font-size:0.8rem;
+              line-height:1.5;
+              resize:vertical;
+              box-sizing:border-box;
+              outline:none;
+            "></textarea>
+            <div class="flex gap-3 items-center mt-2">
+              <span id="emlPasteStatus" class="info-text-sm"></span>
             </div>
           </div>
         </div>
@@ -261,6 +313,53 @@
         clearAnalysis();
       });
     }
+
+    // Tab switching
+    const tabFile = rootEl.querySelector("#emlTabFile");
+    const tabPaste = rootEl.querySelector("#emlTabPaste");
+    const panelFile = rootEl.querySelector("#emlPanelFile");
+    const panelPaste = rootEl.querySelector("#emlPanelPaste");
+
+    function activateTab(tab) {
+      const isFile = tab === "file";
+      tabFile.style.borderBottomColor = isFile ? "var(--security-info)" : "transparent";
+      tabFile.style.color = isFile ? "var(--text-primary)" : "var(--text-secondary)";
+      tabPaste.style.borderBottomColor = !isFile ? "var(--security-info)" : "transparent";
+      tabPaste.style.color = !isFile ? "var(--text-primary)" : "var(--text-secondary)";
+      panelFile.style.display = isFile ? "" : "none";
+      panelPaste.style.display = !isFile ? "" : "none";
+    }
+
+    if (tabFile) tabFile.addEventListener("click", () => activateTab("file"));
+    if (tabPaste) tabPaste.addEventListener("click", () => activateTab("paste"));
+
+    // Paste auto-analyze
+    const pasteInput = rootEl.querySelector("#emlPasteInput");
+    const pasteStatus = rootEl.querySelector("#emlPasteStatus");
+
+    if (pasteInput) {
+      pasteInput.addEventListener("paste", () => {
+        // Let the paste complete first, then analyze
+        setTimeout(() => {
+          const text = pasteInput.value.trim();
+          if (!text) return;
+          if (pasteStatus) pasteStatus.textContent = "Analyzing...";
+          parseEmlContent(text, "Pasted Headers");
+        }, 0);
+      });
+
+      // Also handle manual trigger — Shift+Enter to re-analyze after edits
+      pasteInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && e.shiftKey) {
+          const text = pasteInput.value.trim();
+          if (text) {
+            e.preventDefault();
+            if (pasteStatus) pasteStatus.textContent = "Analyzing...";
+            parseEmlContent(text, "Pasted Headers");
+          }
+        }
+      });
+    }
   }
 
   function handleFile(file) {
@@ -317,6 +416,22 @@
       dropzone.classList.remove("hidden");
       dropzone.classList.add("block");
     }
+
+    // Clear paste textarea and status
+    const pasteInput = rootEl.querySelector("#emlPasteInput");
+    if (pasteInput) pasteInput.value = "";
+    const pasteStatus = rootEl.querySelector("#emlPasteStatus");
+    if (pasteStatus) pasteStatus.textContent = "";
+
+    // Reset tabs back to file tab
+    const tabFile = rootEl.querySelector("#emlTabFile");
+    const tabPaste = rootEl.querySelector("#emlTabPaste");
+    const panelFile = rootEl.querySelector("#emlPanelFile");
+    const panelPaste = rootEl.querySelector("#emlPanelPaste");
+    if (tabFile) { tabFile.style.borderBottomColor = "var(--security-info)"; tabFile.style.color = "var(--text-primary)"; }
+    if (tabPaste) { tabPaste.style.borderBottomColor = "transparent"; tabPaste.style.color = "var(--text-secondary)"; }
+    if (panelFile) panelFile.style.display = "";
+    if (panelPaste) panelPaste.style.display = "none";
   }
 
   // Detect if this is a PhishER wrapper email
