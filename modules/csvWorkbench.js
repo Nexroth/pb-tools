@@ -36,6 +36,8 @@
   let rowFilters    = [];  // [{ field, op, value }] — preset-applied exact filters; op: "eq"|"neq"|"contains"|"empty"|"notempty"
   let calcColumns   = [];  // [{ id, name, formula }] — calculated column definitions
   let manuallyProtectedColumns = new Set(); // User-toggled via right-click → persisted in presets
+  let headerRowOffset = 0;  // Number of rows to skip before treating a row as column headers
+  let hideEmptyCols   = false; // When true, columns with no values in the current filtered view are hidden
 
   // ── Drawer state ──────────────────────────────────────────────────────────
   let drawerState   = { open: false, panel: null };
@@ -472,6 +474,8 @@
   function handleFile(file) {
     if (!file) return;
     currentFile = file;
+    headerRowOffset = 0;  // Reset on every new file load
+    hideEmptyCols   = false;
     updateFileInfo(`Parsing ${file.name}…`);
 
     const ext = file.name.split(".").pop().toLowerCase();
@@ -510,6 +514,51 @@
         renderSummaryPanel();
       },
     });
+  }
+
+  // Re-parse the current file with the current headerRowOffset
+  function reparse() {
+    if (!currentFile) return;
+    const ext = currentFile.name.split(".").pop().toLowerCase();
+
+    if (ext === "xlsx" || ext === "xls") {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb   = XLSX.read(e.target.result, { type: "array" });
+          const ws   = wb.Sheets[wb.SheetNames[0]];
+          // Get raw 2D array so we can apply the offset
+          const raw  = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          if (raw.length <= headerRowOffset) return;
+          const headerRow = raw[headerRowOffset];
+          const dataRows  = raw.slice(headerRowOffset + 1);
+          const fields    = headerRow.map(String);
+          const json      = dataRows.map(r =>
+            Object.fromEntries(fields.map((f, i) => [f, r[i] ?? ""]))
+          );
+          ingestRows(fields, json);
+        } catch (err) {
+          updateFileInfo(`Error re-parsing XLSX: ${err.message || err}`);
+        }
+      };
+      reader.readAsArrayBuffer(currentFile);
+      return;
+    }
+
+    // CSV / TXT — read as text and slice lines
+    const reader = new FileReader();
+    reader.onload = e => {
+      const lines = e.target.result.split(/\r?\n/);
+      const trimmed = lines.slice(headerRowOffset).join("\n");
+      Papa.parse(trimmed, {
+        header: true,
+        skipEmptyLines: true,
+        dynamicTyping: false,
+        complete: results => ingestRows(results.meta.fields || [], results.data || []),
+        error: err => updateFileInfo(`Error re-parsing: ${err.message || err}`),
+      });
+    };
+    reader.readAsText(currentFile);
   }
 
   function ingestRows(rawFields, rawRows) {
@@ -849,6 +898,9 @@
             <option value="">All columns</option>
           </select>
           <button class="search-clear" id="csvSearchClear" title="Clear search" style="display:none;">✕</button>
+          <button class="btn btn-secondary btn-xs" id="csvHideEmptyColsBtn" title="Hide columns with no values in current view" style="margin-left:0.5rem;white-space:nowrap;flex-shrink:0;">
+            Hide empty cols
+          </button>
         </div>
 
         <!-- Row 4: Active row filter badges (hidden when empty) -->
@@ -983,6 +1035,22 @@
         if (searchInput) searchInput.value = "";
         if (searchField) searchField.value = "";
         searchClear.style.display = "none";
+        renderTablePreview();
+      });
+    }
+
+    const hideEmptyBtn = root.querySelector("#csvHideEmptyColsBtn");
+    if (hideEmptyBtn) {
+      // Sync initial visual state
+      hideEmptyBtn.style.opacity = hideEmptyCols ? "1" : "0.5";
+      hideEmptyBtn.style.borderColor = hideEmptyCols ? "var(--security-info)" : "";
+      hideEmptyBtn.style.color = hideEmptyCols ? "var(--security-info)" : "";
+
+      hideEmptyBtn.addEventListener("click", () => {
+        hideEmptyCols = !hideEmptyCols;
+        hideEmptyBtn.style.opacity = hideEmptyCols ? "1" : "0.5";
+        hideEmptyBtn.style.borderColor = hideEmptyCols ? "var(--security-info)" : "";
+        hideEmptyBtn.style.color = hideEmptyCols ? "var(--security-info)" : "";
         renderTablePreview();
       });
     }
@@ -1170,6 +1238,47 @@
 
     el.appendChild(nameSpan);
     el.appendChild(metaSpan);
+
+    // Header row offset control — only shown when a file is loaded
+    const offsetWrap = document.createElement("span");
+    offsetWrap.className = "csv-header-row-ctrl";
+    offsetWrap.style.cssText = `
+      display:inline-flex; align-items:center; gap:0.35rem;
+      margin-left:0.75rem; font-size:0.75rem; color:var(--text-muted);
+    `;
+    offsetWrap.innerHTML = `
+      <span>Header row:</span>
+      <button id="csvHeaderRowDec" style="
+        background:none; border:1px solid var(--border); border-radius:3px;
+        color:var(--text-secondary); width:18px; height:18px; line-height:1;
+        cursor:pointer; font-size:0.7rem; padding:0; display:flex; align-items:center; justify-content:center;
+      ">−</button>
+      <span id="csvHeaderRowVal" style="
+        min-width:1.2rem; text-align:center; color:var(--text-primary); font-weight:600;
+      ">${headerRowOffset + 1}</span>
+      <button id="csvHeaderRowInc" style="
+        background:none; border:1px solid var(--border); border-radius:3px;
+        color:var(--text-secondary); width:18px; height:18px; line-height:1;
+        cursor:pointer; font-size:0.7rem; padding:0; display:flex; align-items:center; justify-content:center;
+      ">+</button>
+    `;
+    el.appendChild(offsetWrap);
+
+    // Wire buttons (after appending so elements exist)
+    const decBtn = el.querySelector("#csvHeaderRowDec");
+    const incBtn = el.querySelector("#csvHeaderRowInc");
+    const valEl  = el.querySelector("#csvHeaderRowVal");
+    if (decBtn) decBtn.addEventListener("click", () => {
+      if (headerRowOffset <= 0) return;
+      headerRowOffset--;
+      valEl.textContent = headerRowOffset + 1;
+      reparse();
+    });
+    if (incBtn) incBtn.addEventListener("click", () => {
+      headerRowOffset++;
+      valEl.textContent = headerRowOffset + 1;
+      reparse();
+    });
 
     if (viewState.activePreset) {
       const allPresets = { ...presets, ...loadUserPresets() };
@@ -5393,6 +5502,14 @@ function executeFormula(formula, row) {
     const MAX_ROWS    = 500;
     const previewRows = filteredRows.slice(0, MAX_ROWS);
 
+    // If hideEmptyCols is on, drop any field where every visible row has an empty value
+    const activeFields = hideEmptyCols
+      ? fields.filter(f => previewRows.some(r => {
+          const v = r[f];
+          return v !== undefined && v !== null && String(v).trim() !== "";
+        }))
+      : fields;
+
     const info = document.createElement("div");
     info.className = "csv-table-info";
     const total = parsedData.rows.length;
@@ -5426,7 +5543,7 @@ function executeFormula(formula, row) {
 
     const headerProtectedCols = getProtectedColumns();
 
-    fields.forEach(field => {
+    activeFields.forEach(field => {
       const th = document.createElement("th");
       const dn = viewState.displayNames[field] || field;
       const isHeaderProtected = headerProtectedCols.has(field);
@@ -5504,7 +5621,7 @@ function executeFormula(formula, row) {
       tr.appendChild(gutterTd);
 
       const protectedCols = getProtectedColumns();
-      fields.forEach(field => {
+      activeFields.forEach(field => {
         const td  = document.createElement("td");
         const val = row[field];
         const displayVal = val == null ? "" : String(val);

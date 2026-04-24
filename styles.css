@@ -5,6 +5,7 @@
 /* ==== Theme Variables ==== */
 
 /* Default/Dark Theme */
+:root,
 #app,
 #app.theme-dark {
   --bg-primary: #0f172a;
@@ -150,6 +151,7 @@
 }
 
 /* Security Colors (consistent across all themes for clarity) */
+:root,
 #app {
   --security-danger: #f87171;
   --security-danger-bg: rgba(239, 68, 68, 0.1);
@@ -1544,7 +1546,7 @@ body {
   color: var(--text-secondary);
   cursor: pointer;
 }
-.data-table tbody tr:hover td { background: var(--bg-tertiary); opacity: 0.3; }
+.data-table tbody tr:hover td { background: var(--bg-tertiary); }
 .data-table tr.annotated td { background: var(--security-success-bg); }
 .data-table td.cell-note {
   color: var(--security-success);
