@@ -168,6 +168,9 @@
           <!-- Attachments Section (dynamically shown/hidden) -->
           <div id="emlAttachmentsSection"></div>
 
+          <!-- Threat Intel Lookup Section (dynamically shown/hidden) -->
+          <div id="emlThreatIntelSection"></div>
+
           <!-- X-Headers Section (dynamically shown/hidden) -->
           <div id="emlXHeadersSection"></div>
 
@@ -701,6 +704,7 @@
     renderAuthResults();
     renderLinksSection();
     renderAttachmentsSection();
+    renderThreatIntelSection();
     renderXHeadersSection();
     renderReceivedPath(false);
     renderRawHeaders();
@@ -1391,6 +1395,174 @@
             ⚠️ Dangerous attachment types detected. Do not open without verification.
           </div>
         ` : ''}
+      </div>
+    `;
+  }
+
+  function renderThreatIntelSection() {
+    const container = rootEl.querySelector("#emlThreatIntelSection");
+    if (!container) return;
+
+    // Collect unique IPs from received headers
+    const ips = [];
+    const seenIps = new Set();
+    (parsedHeaders.receivedHeaders || []).forEach(hop => {
+      const hopData = extractIpAndServer(hop);
+      if (hopData.ip && !seenIps.has(hopData.ip)) {
+        // Skip RFC1918 private IPs — not useful to look up
+        if (!/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hopData.ip)) {
+          seenIps.add(hopData.ip);
+          ips.push(hopData.ip);
+        }
+      }
+    });
+    // Also check X-Originating-IP
+    const xHeaders = parseXHeaders();
+    if (xHeaders.originatingIp?.ip && !seenIps.has(xHeaders.originatingIp.ip)) {
+      if (!/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(xHeaders.originatingIp.ip)) {
+        seenIps.add(xHeaders.originatingIp.ip);
+        ips.push(xHeaders.originatingIp.ip);
+      }
+    }
+
+    const links = parsedHeaders.links || [];
+    const attachments = parsedHeaders.attachments || [];
+
+    // Nothing to show
+    if (ips.length === 0 && links.length === 0 && attachments.length === 0) {
+      container.classList.add("hidden");
+      return;
+    }
+
+    container.classList.remove("hidden");
+
+    // Helper: build a lookup button
+    function lookupBtn(label, icon, url, color) {
+      return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="
+        display:inline-flex; align-items:center; gap:0.3rem;
+        padding:0.2rem 0.55rem; border-radius:4px; font-size:0.7rem; font-weight:600;
+        border:1px solid ${color}; color:${color}; text-decoration:none;
+        cursor:pointer; white-space:nowrap;
+        transition:background 0.15s;
+      " onmouseover="this.style.background='${color}20'" onmouseout="this.style.background=''"
+        onclick="event.stopPropagation();"
+      >${icon} ${label}</a>`;
+    }
+
+    // External warning banner (shown once at top)
+    const warningBanner = `
+      <div style="
+        display:flex; align-items:flex-start; gap:0.6rem;
+        padding:0.6rem 0.75rem; margin-bottom:1rem;
+        background:rgba(251,146,60,0.08); border:1px solid rgba(251,146,60,0.35);
+        border-radius:6px; font-size:0.75rem; color:var(--security-orange);
+        line-height:1.4;
+      ">
+        <span style="font-size:1rem;flex-shrink:0;">⚠️</span>
+        <span>
+          <strong>External lookup notice:</strong> These buttons open third-party websites in a new tab.
+          No data is sent automatically — the value is included in the URL you open.
+          Do not click links or visit URLs from suspicious emails directly.
+        </span>
+      </div>
+    `;
+
+    // IP rows
+    let ipRows = "";
+    if (ips.length > 0) {
+      ipRows = `
+        <div style="margin-bottom:0.85rem;">
+          <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase;
+                      letter-spacing:0.05em; color:var(--text-muted); margin-bottom:0.4rem;">
+            IP Addresses (${ips.length})
+          </div>
+          ${ips.map(ip => `
+            <div style="
+              display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;
+              padding:0.45rem 0.6rem; margin-bottom:0.3rem;
+              background:rgba(15,23,42,0.4); border-radius:5px;
+              border:1px solid rgba(148,163,184,0.12);
+            ">
+              <span style="font-family:monospace; font-size:0.8rem; color:var(--text-primary); min-width:130px;">${escapeHtml(ip)}</span>
+              <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                ${lookupBtn("AbuseIPDB", "🛡️", `https://www.abuseipdb.com/check/${ip}`, "var(--security-danger)")}
+                ${lookupBtn("VirusTotal", "🔬", `https://www.virustotal.com/gui/ip-address/${ip}`, "var(--security-info)")}
+                ${lookupBtn("Shodan", "🔭", `https://www.shodan.io/host/${ip}`, "var(--security-orange)")}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    // URL rows
+    let urlRows = "";
+    if (links.length > 0) {
+      urlRows = `
+        <div style="margin-bottom:0.85rem;">
+          <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase;
+                      letter-spacing:0.05em; color:var(--text-muted); margin-bottom:0.4rem;">
+            URLs (${links.length})
+          </div>
+          ${links.map(link => `
+            <div style="
+              display:flex; align-items:flex-start; gap:0.5rem; flex-wrap:wrap;
+              padding:0.45rem 0.6rem; margin-bottom:0.3rem;
+              background:rgba(15,23,42,0.4); border-radius:5px;
+              border:1px solid ${link.warnings.length > 0 ? 'rgba(239,68,68,0.25)' : 'rgba(148,163,184,0.12)'};
+            ">
+              <div style="flex:1; min-width:0;">
+                <div style="font-family:monospace; font-size:0.72rem; color:var(--text-secondary);
+                            word-break:break-all; margin-bottom:0.3rem;">${escapeHtml(link.url)}</div>
+                <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                  ${lookupBtn("VirusTotal", "🔬", `https://www.virustotal.com/gui/url?url=${encodeURIComponent(link.url)}`, "var(--security-info)")}
+                  ${lookupBtn("URLScan.io", "🔍", `https://urlscan.io/search/#page.url:${encodeURIComponent(link.url)}`, "var(--security-success)")}
+                  ${lookupBtn("URLhaus", "☣️", `https://urlhaus.abuse.ch/browse.php?search=${encodeURIComponent(link.url)}`, "var(--security-orange)")}
+                </div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    // Attachment rows
+    let attachRows = "";
+    if (attachments.length > 0) {
+      attachRows = `
+        <div style="margin-bottom:0.5rem;">
+          <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase;
+                      letter-spacing:0.05em; color:var(--text-muted); margin-bottom:0.4rem;">
+            Attachments (${attachments.length})
+          </div>
+          ${attachments.map(att => `
+            <div style="
+              display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;
+              padding:0.45rem 0.6rem; margin-bottom:0.3rem;
+              background:rgba(15,23,42,0.4); border-radius:5px;
+              border:1px solid ${att.warnings.length > 0 ? 'rgba(239,68,68,0.25)' : 'rgba(148,163,184,0.12)'};
+            ">
+              <span style="font-family:monospace; font-size:0.8rem; color:var(--text-primary); min-width:200px; word-break:break-all;">
+                ${escapeHtml(att.filename)}
+              </span>
+              <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                ${lookupBtn("VirusTotal", "🔬", `https://www.virustotal.com/gui/search?query=${encodeURIComponent(att.filename)}`, "var(--security-info)")}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }
+
+    container.innerHTML = `
+      <div class="section-card mb-5">
+        <div class="section-card-header">
+          🔎 Threat Intel Lookups
+        </div>
+        ${warningBanner}
+        ${ipRows}
+        ${urlRows}
+        ${attachRows}
       </div>
     `;
   }

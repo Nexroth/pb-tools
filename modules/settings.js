@@ -98,7 +98,7 @@
               PB Tools
             </h3>
             <p style="color: var(--text-muted); margin: 0 0 0.5rem; font-size: 0.8rem;">
-              Version 0.7.1 &bull; Local only
+              Version 0.7.3 &bull; Local only
             </p>
             <p style="color: var(--text-secondary); margin: 0 0 0.5rem; font-size: 0.9rem;">
               Security Operations Toolset
@@ -221,7 +221,7 @@
       // Collect all PB Tools data from localStorage
       const backup = {
         _metadata: {
-          version: "0.7.1",
+          version: "0.7.3",
           exportDate: new Date().toISOString(),
           description: "PB Tools data backup"
         },
